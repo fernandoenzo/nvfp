@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // GameDB represents the games.json database.
@@ -24,7 +25,7 @@ type Game struct {
 // UWPPackageFamilyName derives the package family name from the app_id
 // by taking everything before the first '!'.
 func (g Game) UWPPackageFamilyName() string {
-	idx := stringsIndex(g.AppID, "!")
+	idx := strings.Index(g.AppID, "!")
 	if idx < 0 {
 		return g.AppID
 	}
@@ -65,8 +66,7 @@ func SaveToPath(db *GameDB, path string) error {
 }
 
 // ResolveGames loads the games database with priority: remote > cache > bundled.
-// The caller should attempt the remote download separately and pass the result.
-func ResolveGames(cacheDir string, offline bool, bundledData []byte, remoteData []byte) (*GameDB, error) {
+func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*GameDB, error) {
 	// Try remote first
 	if remoteData != nil {
 		db, err := LoadFromBytes(remoteData)
@@ -77,7 +77,7 @@ func ResolveGames(cacheDir string, offline bool, bundledData []byte, remoteData 
 		}
 	}
 
-	// Try cache (unless offline, remote already failed)
+	// Try cache
 	cachePath := filepath.Join(cacheDir, "games.json")
 	if _, err := os.Stat(cachePath); err == nil {
 		db, err := LoadFromPath(cachePath)
@@ -88,13 +88,4 @@ func ResolveGames(cacheDir string, offline bool, bundledData []byte, remoteData 
 
 	// Bundled fallback
 	return LoadFromBytes(bundledData)
-}
-
-func stringsIndex(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

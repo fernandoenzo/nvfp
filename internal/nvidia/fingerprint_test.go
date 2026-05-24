@@ -14,8 +14,8 @@ func TestParseProfileDB(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	if len(db.Fingerprints) != 3 {
-		t.Fatalf("expected 3 fingerprints, got %d", len(db.Fingerprints))
+	if len(db.Fingerprints) != 4 {
+		t.Fatalf("expected 4 fingerprints, got %d", len(db.Fingerprints))
 	}
 
 	// Check first fingerprint
@@ -314,5 +314,107 @@ func TestXmlUnmarshalMarshal(t *testing.T) {
 	}
 	if !strings.Contains(result, "SteamAppIds") {
 		t.Error("output missing SteamAppIds")
+	}
+}
+
+func TestFindSourceVersion_EpicFallback(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "epic_only_game")
+	if fp == nil {
+		t.Fatal("epic_only_game fingerprint not found")
+	}
+
+	src := FindSourceVersion(fp)
+	if src == nil {
+		t.Fatal("expected a source version, got nil")
+	}
+	if !strings.EqualFold(src.Name, "epic") {
+		t.Errorf("expected epic source version, got %q", src.Name)
+	}
+}
+
+func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	src := FindSourceVersion(fp)
+
+	appID := "TestPkg_abc!TestApp"
+
+	// Override a forced field (Distributor) and a non-forced field
+	overrides := map[string]string{
+		"Distributor": "CustomDist",
+		"DriverProfile": "custom.exe",
+	}
+
+	clone := CloneVersion(src, appID, overrides, nil)
+
+	// Build a map of element names (lowercased) to count and content
+	seen := make(map[string][]string)
+	for _, e := range clone.Elements {
+		lower := strings.ToLower(e.ElementName())
+		seen[lower] = append(seen[lower], e.Content)
+	}
+
+	// Distributor must appear exactly once with the override value
+	if count := len(seen["distributor"]); count != 1 {
+		t.Errorf("Distributor appeared %d times, want 1", count)
+	}
+	if seen["distributor"][0] != "CustomDist" {
+		t.Errorf("Distributor = %q, want CustomDist", seen["distributor"][0])
+	}
+
+	// UWPPackageFamilyName must appear exactly once
+	if count := len(seen["uwppackagefamilyname"]); count != 1 {
+		t.Errorf("UWPPackageFamilyName appeared %d times, want 1", count)
+	}
+	if seen["uwppackagefamilyname"][0] != "TestPkg_abc" {
+		t.Errorf("UWPPackageFamilyName = %q, want TestPkg_abc", seen["uwppackagefamilyname"][0])
+	}
+
+	// AppUserModelId must appear exactly once
+	if count := len(seen["appusermodelid"]); count != 1 {
+		t.Errorf("AppUserModelId appeared %d times, want 1", count)
+	}
+	if seen["appusermodelid"][0] != appID {
+		t.Errorf("AppUserModelId = %q, want %s", seen["appusermodelid"][0], appID)
+	}
+
+	// Non-forced override should also work
+	if count := len(seen["driverprofile"]); count != 1 {
+		t.Errorf("DriverProfile appeared %d times, want 1", count)
+	}
+	if seen["driverprofile"][0] != "custom.exe" {
+		t.Errorf("DriverProfile = %q, want custom.exe", seen["driverprofile"][0])
+	}
+}
+
+func TestCloneVersion_ForcedFieldNoOverride(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	src := FindSourceVersion(fp)
+
+	appID := "TestPkg_abc!TestApp"
+	clone := CloneVersion(src, appID, nil, nil)
+
+	seen := make(map[string][]string)
+	for _, e := range clone.Elements {
+		lower := strings.ToLower(e.ElementName())
+		seen[lower] = append(seen[lower], e.Content)
+	}
+
+	// Without overrides, Distributor defaults to UWP
+	if count := len(seen["distributor"]); count != 1 {
+		t.Errorf("Distributor appeared %d times, want 1", count)
+	}
+	if seen["distributor"][0] != "UWP" {
+		t.Errorf("Distributor = %q, want UWP", seen["distributor"][0])
+	}
+
+	// UWPPackageFamilyName and AppUserModelId must also appear exactly once
+	if count := len(seen["uwppackagefamilyname"]); count != 1 {
+		t.Errorf("UWPPackageFamilyName appeared %d times, want 1", count)
+	}
+	if count := len(seen["appusermodelid"]); count != 1 {
+		t.Errorf("AppUserModelId appeared %d times, want 1", count)
 	}
 }

@@ -16,9 +16,8 @@ import (
 var bundledGames []byte
 
 var (
-	offline bool
-	dryRun  bool
-	listOnly bool
+	dryRun    bool
+	listOnly   bool
 	gameFilter string
 )
 
@@ -29,7 +28,6 @@ func main() {
 		RunE:  run,
 	}
 
-	rootCmd.Flags().BoolVar(&offline, "offline", false, "Don't download remote games.json")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
 	rootCmd.Flags().BoolVar(&listOnly, "list", false, "List games in the database")
 	rootCmd.Flags().StringVar(&gameFilter, "game", "", "Patch only a specific game (by fingerprint)")
@@ -40,33 +38,31 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// Resolve games database
 	gameDB, err := resolveGames()
 	if err != nil {
 		return fmt.Errorf("loading games database: %w", err)
 	}
-
-	// --list mode
 	if listOnly {
 		return listGames(gameDB)
 	}
 
-	// Find NVIDIA fingerprint.db files
 	nvidiaDir, err := findNvidiaDir()
 	if err != nil {
 		return fmt.Errorf("finding NVIDIA directory: %w", err)
 	}
-
 	dbPaths, err := findFingerprintDBs(nvidiaDir)
 	if err != nil {
 		return fmt.Errorf("finding fingerprint databases: %w", err)
 	}
-
 	if len(dbPaths) == 0 {
 		return fmt.Errorf("no fingerprint.db files found under %s", nvidiaDir)
 	}
 
-	// Patch each fingerprint.db
+	return patchAllDBs(gameDB, dbPaths)
+}
+
+// patchAllDBs patches each fingerprint.db path and reports results.
+func patchAllDBs(gameDB *db.GameDB, dbPaths []string) error {
 	anyModified := false
 	for _, dbPath := range dbPaths {
 		modified, err := patchDB(gameDB, dbPath)
@@ -78,11 +74,9 @@ func run(cmd *cobra.Command, args []string) error {
 			anyModified = true
 		}
 	}
-
 	if !anyModified {
 		fmt.Println("No changes made.")
 	}
-
 	return nil
 }
 
@@ -95,21 +89,19 @@ func resolveGames() (*db.GameDB, error) {
 
 	// Try remote
 	var remoteData []byte
-	if !offline {
-		data, err := update.FetchGamesJSON()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
-		} else {
-			remoteData = data
-			// Cache it
-			remoteDB, err := db.LoadFromBytes(remoteData)
-			if err == nil {
-				_ = db.SaveToPath(remoteDB, filepath.Join(cacheDir, "games.json"))
-			}
+	data, err := update.FetchGamesJSON()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
+	} else {
+		remoteData = data
+		// Cache it
+		remoteDB, err := db.LoadFromBytes(remoteData)
+		if err == nil {
+			_ = db.SaveToPath(remoteDB, filepath.Join(cacheDir, "games.json"))
 		}
 	}
 
-	return db.ResolveGames(cacheDir, offline, bundledGames, remoteData)
+	return db.ResolveGames(cacheDir, bundledGames, remoteData)
 }
 
 func getCacheDir() (string, error) {
@@ -127,36 +119,37 @@ func getCacheDir() (string, error) {
 }
 
 func findNvidiaDir() (string, error) {
-	// Check common NVIDIA App installation paths
-	// On Windows: C:\ProgramData\NVIDIA Corporation\NvBackend
-	programData := os.Getenv("PROGRAMDATA")
-	if programData != "" {
-		candidate := filepath.Join(programData, "NVIDIA Corporation", "NvBackend")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
+	envVars := []string{"PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"}
+	for _, envVar := range envVars {
+		val := os.Getenv(envVar)
+		if val == "" {
+			continue
+		}
+		candidate := filepath.Join(val, "NVIDIA Corporation", "NvBackend")
+		if found, err := checkNvidiaDir(candidate); found != "" {
+			return found, nil
+		} else if err != nil {
+			return "", err
 		}
 	}
-
-	// Check PROGRAMFILES
-	progFiles := os.Getenv("PROGRAMFILES")
-	if progFiles != "" {
-		candidate := filepath.Join(progFiles, "NVIDIA Corporation", "NvBackend")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
-		}
-	}
-
-	// Check PROGRAMFILES(X86)
-	progFiles86 := os.Getenv("PROGRAMFILES(X86)")
-	if progFiles86 != "" {
-		candidate := filepath.Join(progFiles86, "NVIDIA Corporation", "NvBackend")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
-		}
-	}
-
 	return "", fmt.Errorf("NVIDIA App directory not found")
 }
+
+// checkNvidiaDir returns the dir if it exists and is a directory.
+func checkNvidiaDir(candidate string) (string, error) {
+	info, err := os.Stat(candidate)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if info.IsDir() {
+		return candidate, nil
+	}
+	return "", nil
+}
+
 
 func findFingerprintDBs(nvidiaDir string) ([]string, error) {
 	var results []string
@@ -187,46 +180,13 @@ func findFingerprintDBs(nvidiaDir string) ([]string, error) {
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 	fmt.Printf("Processing: %s\n", dbPath)
 
-	// Parse the fingerprint database
 	profileDB, err := nvidia.ParseProfileDB(dbPath)
 	if err != nil {
 		return false, fmt.Errorf("parsing %s: %w", dbPath, err)
 	}
 
-	// Track which games we patched
-	modified := false
-
-	games := gameDB.Games
-	if gameFilter != "" {
-		var filtered []db.Game
-		for _, g := range games {
-			if g.Fingerprint == gameFilter {
-				filtered = append(filtered, g)
-				break
-			}
-		}
-		if len(filtered) == 0 {
-			fmt.Printf("  Game %q not found in games database\n", gameFilter)
-			return false, nil
-		}
-		games = filtered
-	}
-
-	for _, game := range games {
-		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Overrides, game.Remove)
-
-		switch result.Status {
-		case "patched":
-			modified = true
-			fmt.Printf("  ✓ %s\n", result.Message)
-		case "already_uwp":
-			fmt.Printf("  ⊘ %s\n", result.Message)
-		case "not_found":
-			fmt.Printf("  ✗ %s\n", result.Message)
-		case "no_source":
-			fmt.Printf("  ✗ %s\n", result.Message)
-		}
-	}
+	games := filterGames(gameDB)
+	modified := applyPatches(profileDB, games)
 
 	if !modified || dryRun {
 		if dryRun && modified {
@@ -235,17 +195,50 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 		return modified, nil
 	}
 
-	// Backup before writing
+	return writePatch(profileDB, dbPath)
+}
+
+// filterGames returns the games list, optionally filtered by --game flag.
+func filterGames(gameDB *db.GameDB) []db.Game {
+	if gameFilter == "" {
+		return gameDB.Games
+	}
+	for _, g := range gameDB.Games {
+		if g.Fingerprint == gameFilter {
+			return []db.Game{g}
+		}
+	}
+	fmt.Printf("  Game %q not found in games database\n", gameFilter)
+	return nil
+}
+
+// applyPatches patches all games and returns whether any were modified.
+func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
+	modified := false
+	for _, game := range games {
+		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Overrides, game.Remove)
+		switch result.Status {
+		case "patched":
+			modified = true
+			fmt.Printf("  ✓ %s\n", result.Message)
+		case "already_uwp":
+			fmt.Printf("  ⊘ %s\n", result.Message)
+		case "not_found", "no_source":
+			fmt.Printf("  ✗ %s\n", result.Message)
+		}
+	}
+	return modified
+}
+
+// writePatch backs up, writes the patched database, and updates metadata.
+func writePatch(profileDB *nvidia.ProfileDB, dbPath string) (bool, error) {
 	if err := nvidia.BackupFile(dbPath); err != nil {
 		return false, fmt.Errorf("backing up %s: %w", dbPath, err)
 	}
-
-	// Write patched database
 	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
 		return false, fmt.Errorf("writing %s: %w", dbPath, err)
 	}
 
-	// Update metadata.json SHA256 if it exists
 	dir := filepath.Dir(dbPath)
 	metadataPath := filepath.Join(dir, "metadata.json")
 	if _, err := os.Stat(metadataPath); err == nil {
@@ -255,7 +248,6 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 			fmt.Printf("  Updated metadata.json SHA256\n")
 		}
 	}
-
 	return true, nil
 }
 

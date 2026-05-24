@@ -100,7 +100,7 @@ func TestSaveAndLoad(t *testing.T) {
 func TestResolveGamesBundled(t *testing.T) {
 	data := []byte(`{"version":1,"games":[{"fingerprint":"test","app_id":"Pkg!App"}]}`)
 
-	db, err := ResolveGames(t.TempDir(), true, data, nil)
+	db, err := ResolveGames(t.TempDir(), data, nil)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestResolveGamesRemote(t *testing.T) {
 	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_id":"Pkg!App2"}]}`)
 
 	cacheDir := t.TempDir()
-	db, err := ResolveGames(cacheDir, false, bundled, remote)
+	db, err := ResolveGames(cacheDir, bundled, remote)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestResolveGamesFallbackToBundled(t *testing.T) {
 	cacheDir := t.TempDir()
 
 	// No remote data, no cache → should use bundled
-	db, err := ResolveGames(cacheDir, true, bundled, nil)
+	db, err := ResolveGames(cacheDir, bundled, nil)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}

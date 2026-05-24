@@ -43,4 +43,14 @@
       <Distributor>UWP</Distributor>
     </Version>
   </Fingerprint>
+  <Fingerprint name="epic_only_game">
+    <Version name="epic">
+      <CMSID>11111</CMSID>
+      <CMSVersion>2.0</CMSVersion>
+      <DriverProfile>EpicGame.exe</DriverProfile>
+      <Distributor>Epic</Distributor>
+      <EpicAppId>epic-game-id</EpicAppId>
+      <IsAutomatable>1</IsAutomatable>
+    </Version>
+  </Fingerprint>
 </ProfileDB>

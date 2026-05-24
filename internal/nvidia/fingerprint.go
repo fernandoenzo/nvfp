@@ -70,8 +70,8 @@ var defaultRemoveFields = []string{
 	"OculusAppId",
 }
 
-// IsDefaultRemoveField checks if an element name is in the default remove list.
-func IsDefaultRemoveField(name string) bool {
+// isDefaultRemoveField checks if an element name is in the default remove list.
+func isDefaultRemoveField(name string) bool {
 	for _, f := range defaultRemoveFields {
 		if strings.EqualFold(name, f) {
 			return true
@@ -122,30 +122,31 @@ func WriteProfileDB(db *ProfileDB, path string) error {
 func BackupFile(path string) error {
 	bakPath := path + ".bak"
 	if _, err := os.Stat(bakPath); err == nil {
-		// Backup already exists
 		return nil
 	}
+	return copyFile(path, bakPath)
+}
 
-	src, err := os.Open(path)
+// copyFile copies src to dst, creating the destination directory if needed.
+func copyFile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
 	if err != nil {
-		return fmt.Errorf("opening %s for backup: %w", path, err)
+		return fmt.Errorf("opening %s: %w", srcPath, err)
 	}
 	defer src.Close()
 
-	if err := os.MkdirAll(filepath.Dir(bakPath), 0o755); err != nil {
-		return fmt.Errorf("creating backup directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
 	}
-
-	dst, err := os.Create(bakPath)
+	dst, err := os.Create(dstPath)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", bakPath, err)
+		return fmt.Errorf("creating %s: %w", dstPath, err)
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("copying to backup: %w", err)
+		return fmt.Errorf("copying file: %w", err)
 	}
-
 	return nil
 }
 
@@ -189,85 +190,117 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 // It removes default fields, applies overrides, adds UWP-specific fields,
 // forces Distributor to UWP, and sets the version name.
 func CloneVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
-	// Deep copy elements
+	removeSet := buildRemoveSet(remove)
+	forcedFields := buildForcedFields(appID)
+	overrideSet := buildOverrideSet(overrides, forcedFields)
+
 	clone := Version{
 		Name:     "uwp",
 		Elements: make([]XmlElement, 0, len(src.Elements)),
 	}
+	copyPreservedElements(&clone, src, removeSet, forcedFields, overrideSet)
+	applyNonForcedOverrides(&clone, overrides, forcedFields)
+	appendForcedElements(&clone, forcedFields, overrides)
+	return clone
+}
 
-	// Build remove set
+// buildRemoveSet creates a set of element names to remove during cloning.
+func buildRemoveSet(extra []string) map[string]bool {
 	removeSet := make(map[string]bool)
 	for _, f := range defaultRemoveFields {
 		removeSet[strings.ToLower(f)] = true
 	}
-	for _, f := range remove {
+	for _, f := range extra {
 		removeSet[strings.ToLower(f)] = true
 	}
+	return removeSet
+}
 
-	// Build override set
+// buildForcedFields returns the map of forced field names to their default values.
+// Override values take priority and are resolved later in appendForcedElements.
+func buildForcedFields(appID string) map[string]string {
+	pkgFamily := appID
+	if idx := strings.Index(appID, "!"); idx >= 0 {
+		pkgFamily = appID[:idx]
+	}
+	return map[string]string{
+		"distributor":          "UWP",
+		"uwppackagefamilyname": pkgFamily,
+		"appusermodelid":       appID,
+	}
+}
+
+// buildOverrideSet collects non-forced override keys.
+func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string]bool {
 	overrideSet := make(map[string]bool)
 	for k := range overrides {
-		overrideSet[strings.ToLower(k)] = true
+		nameLower := strings.ToLower(k)
+		if _, forced := forcedFields[nameLower]; !forced {
+			overrideSet[nameLower] = true
+		}
 	}
+	return overrideSet
+}
 
-	// Copy elements, skipping removed fields and fields that will be overridden
-	hasDistributor := false
+// copyPreservedElements deep-copies source elements that survive filtering.
+func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, forcedFields map[string]string, overrideSet map[string]bool) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
-
-		if removeSet[nameLower] {
+		if removeSet[nameLower] || overrideSet[nameLower] {
 			continue
 		}
-
-		if overrideSet[nameLower] {
-			// Will be replaced by overrides below
+		if _, forced := forcedFields[nameLower]; forced {
 			continue
 		}
-
-		if strings.ToLower(elem.ElementName()) == "distributor" {
-			hasDistributor = true
-			clone.Elements = append(clone.Elements, XmlElement{
-				XMLName: xml.Name{Local: "Distributor"},
-				Content: "UWP",
-			})
-			continue
-		}
-
 		clone.Elements = append(clone.Elements, deepCopyElement(elem))
 	}
-
-	// Add Distributor if it wasn't in source
-	if !hasDistributor {
-		clone.Elements = append(clone.Elements, XmlElement{
-			XMLName: xml.Name{Local: "Distributor"},
-			Content: "UWP",
-		})
-	}
-
-	// Apply overrides
+}
+// applyNonForcedOverrides appends override elements that are not forced fields.
+func applyNonForcedOverrides(clone *Version, overrides map[string]string, forcedFields map[string]string) {
 	for k, v := range overrides {
+		if _, forced := forcedFields[strings.ToLower(k)]; forced {
+			continue
+		}
 		clone.Elements = append(clone.Elements, XmlElement{
 			XMLName: xml.Name{Local: k},
 			Content: v,
 		})
 	}
+}
 
-	// Add UWP-specific fields
-	pkgFamily := appID
-	if idx := strings.Index(appID, "!"); idx >= 0 {
-		pkgFamily = appID[:idx]
+// appendForcedElements emits forced fields exactly once, with override values taking priority.
+func appendForcedElements(clone *Version, forcedFields map[string]string, overrides map[string]string) {
+	for name, defaultVal := range forcedFields {
+		val := defaultVal
+		elemName := canonicalFieldName(name)
+		if overrides != nil {
+			for k, v := range overrides {
+				if strings.ToLower(k) == name {
+					val = v
+					elemName = k
+					break
+				}
+			}
+		}
+		clone.Elements = append(clone.Elements, XmlElement{
+			XMLName: xml.Name{Local: elemName},
+			Content: val,
+		})
 	}
+}
 
-	clone.Elements = append(clone.Elements, XmlElement{
-		XMLName: xml.Name{Local: "UWPPackageFamilyName"},
-		Content: pkgFamily,
-	})
-	clone.Elements = append(clone.Elements, XmlElement{
-		XMLName: xml.Name{Local: "AppUserModelId"},
-		Content: appID,
-	})
-
-	return clone
+// canonicalFieldName maps a lowercased forced field name back to its canonical casing.
+func canonicalFieldName(lower string) string {
+	switch lower {
+	case "distributor":
+		return "Distributor"
+	case "uwppackagefamilyname":
+		return "UWPPackageFamilyName"
+	case "appusermodelid":
+		return "AppUserModelId"
+	default:
+		return lower
+	}
 }
 
 // deepCopyElement creates a deep copy of an XmlElement.
@@ -299,36 +332,25 @@ type PatchResult struct {
 func PatchGame(db *ProfileDB, fingerprint, appID string, overrides map[string]string, remove []string) PatchResult {
 	fp := FindFingerprint(db, fingerprint)
 	if fp == nil {
-		return PatchResult{
-			Fingerprint: fingerprint,
-			Status:       "not_found",
-			Message:      fmt.Sprintf("fingerprint %q not found in database", fingerprint),
-		}
+		return patchResult(fingerprint, "not_found", "fingerprint %q not found in database", fingerprint)
 	}
-
 	if HasUWPVersion(fp) {
-		return PatchResult{
-			Fingerprint: fingerprint,
-			Status:       "already_uwp",
-			Message:      fmt.Sprintf("fingerprint %q already has a UWP version (NVIDIA includes it)", fingerprint),
-		}
+		return patchResult(fingerprint, "already_uwp", "fingerprint %q already has a UWP version (NVIDIA includes it)", fingerprint)
 	}
-
 	src := FindSourceVersion(fp)
 	if src == nil {
-		return PatchResult{
-			Fingerprint: fingerprint,
-			Status:       "no_source",
-			Message:      fmt.Sprintf("no source version found for fingerprint %q", fingerprint),
-		}
+		return patchResult(fingerprint, "no_source", "no source version found for fingerprint %q", fingerprint)
 	}
-
 	clone := CloneVersion(src, appID, overrides, remove)
 	fp.Versions = append(fp.Versions, clone)
+	return patchResult(fingerprint, "patched", "patched %q (cloned from %q)", fingerprint, src.Name)
+}
 
+// patchResult builds a PatchResult with a formatted message.
+func patchResult(fingerprint, status, format string, args ...any) PatchResult {
 	return PatchResult{
 		Fingerprint: fingerprint,
-		Status:       "patched",
-		Message:      fmt.Sprintf("patched %q (cloned from %q)", fingerprint, src.Name),
+		Status:       status,
+		Message:      fmt.Sprintf(format, args...),
 	}
 }

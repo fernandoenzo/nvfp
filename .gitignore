@@ -1,1 +1,30 @@
+# Binaries
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build output
+nvidia-uwp-patch
+
+# Test binary
+*.test
+
+# Coverage / profiling
+cover.out
+coverage.txt
+*.prof
+
+# Vendor
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

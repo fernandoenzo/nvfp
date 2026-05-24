@@ -14,8 +14,8 @@ func TestParseProfileDB(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	if len(db.Fingerprints) != 4 {
-		t.Fatalf("expected 4 fingerprints, got %d", len(db.Fingerprints))
+	if len(db.Fingerprints) != 5 {
+		t.Fatalf("expected 5 fingerprints, got %d", len(db.Fingerprints))
 	}
 
 	// Check first fingerprint
@@ -204,6 +204,7 @@ func TestPatchGame(t *testing.T) {
 		{"already_uwp_game", "Pkg!App", "already_uwp"},
 		{"nonexistent_game", "Pkg!App", "not_found"},
 		{"no_source_game", "Pkg!App", "already_uwp"},
+		{"empty_game", "Pkg!App", "no_source"},
 	}
 
 	for _, tt := range tests {

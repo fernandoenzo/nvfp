@@ -161,6 +161,7 @@ func FindFingerprint(db *ProfileDB, name string) *Fingerprint {
 }
 
 // HasUWPVersion checks if a fingerprint already has a UWP version.
+// Uses case-insensitive comparison for robustness.
 func HasUWPVersion(fp *Fingerprint) bool {
 	for _, v := range fp.Versions {
 		if strings.EqualFold(v.Name, "uwp") {

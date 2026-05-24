@@ -126,25 +126,23 @@ func findNvidiaDir() (string, error) {
 			continue
 		}
 		candidate := filepath.Join(val, "NVIDIA Corporation", "NvBackend")
-		if found, err := checkNvidiaDir(candidate); found != "" {
+		if found := checkNvidiaDir(candidate); found != "" {
 			return found, nil
-		} else if err != nil {
-			return "", err
 		}
 	}
 	return "", fmt.Errorf("NVIDIA App directory not found")
 }
 
-// checkNvidiaDir returns the dir if it exists and is a directory.
-func checkNvidiaDir(candidate string) (string, error) {
+// checkNvidiaDir returns the directory path if it exists and is a directory, otherwise "".
+func checkNvidiaDir(candidate string) string {
 	info, err := os.Stat(candidate)
 	if err != nil {
-		return "", nil
+		return ""
 	}
 	if info.IsDir() {
-		return candidate, nil
+		return candidate
 	}
-	return "", nil
+	return ""
 }
 
 
@@ -160,7 +158,11 @@ func findFingerprintDBs(nvidiaDir string) ([]string, error) {
 	// DAO paths
 	daoDir := filepath.Join(nvidiaDir, "DAO")
 	entries, err := os.ReadDir(daoDir)
-	if err == nil {
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  Warning: could not read DAO directory: %v\n", err)
+		}
+	} else {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				dbPath := filepath.Join(daoDir, entry.Name(), "fingerprint.db")

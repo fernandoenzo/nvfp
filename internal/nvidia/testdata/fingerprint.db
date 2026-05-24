@@ -53,4 +53,6 @@
       <IsAutomatable>1</IsAutomatable>
     </Version>
   </Fingerprint>
+  <Fingerprint name="empty_game">
+  </Fingerprint>
 </ProfileDB>

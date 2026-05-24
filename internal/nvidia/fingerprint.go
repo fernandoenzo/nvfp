@@ -216,6 +216,8 @@ func buildRemoveSet(extra []string) map[string]bool {
 	return removeSet
 }
 
+// forcedFieldOrder defines the deterministic order for emitting forced fields.
+var forcedFieldOrder = []string{"distributor", "uwppackagefamilyname", "appusermodelid"}
 // buildForcedFields returns the map of forced field names to their default values.
 // Override values take priority and are resolved later in appendForcedElements.
 func buildForcedFields(appID string) map[string]string {
@@ -270,7 +272,8 @@ func applyNonForcedOverrides(clone *Version, overrides map[string]string, forced
 
 // appendForcedElements emits forced fields exactly once, with override values taking priority.
 func appendForcedElements(clone *Version, forcedFields map[string]string, overrides map[string]string) {
-	for name, defaultVal := range forcedFields {
+	for _, name := range forcedFieldOrder {
+		defaultVal := forcedFields[name]
 		val := defaultVal
 		elemName := canonicalFieldName(name)
 		if overrides != nil {

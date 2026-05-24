@@ -139,10 +139,7 @@ func findNvidiaDir() (string, error) {
 func checkNvidiaDir(candidate string) (string, error) {
 	info, err := os.Stat(candidate)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
+		return "", nil
 	}
 	if info.IsDir() {
 		return candidate, nil

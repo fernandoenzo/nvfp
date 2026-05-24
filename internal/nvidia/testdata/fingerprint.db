@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ProfileDB>
+  <Fingerprint name="final_fantasy_vii_remake">
+    <Version name="steam">
+      <CMSID>12345</CMSID>
+      <CMSVersion>1.0</CMSVersion>
+      <DriverProfile>FF7R.exe</DriverProfile>
+      <Distributor>Steam</Distributor>
+      <Files>some_files</Files>
+      <Launch>some_launch</Launch>
+      <SteamAppIds>123456</SteamAppIds>
+      <Directories>some_dirs</Directories>
+      <InstallDirRegValues>some_reg</InstallDirRegValues>
+      <IsAutomatable>1</IsAutomatable>
+      <WhisperModePopsFactor>0.5</WhisperModePopsFactor>
+    </Version>
+    <Version name="epic">
+      <CMSID>67890</CMSID>
+      <CMSVersion>1.0</CMSVersion>
+      <DriverProfile>FF7R_Epic.exe</DriverProfile>
+      <Distributor>Epic</Distributor>
+      <EpicAppId>some-epic-id</EpicAppId>
+      <IsAutomatable>1</IsAutomatable>
+    </Version>
+  </Fingerprint>
+  <Fingerprint name="already_uwp_game">
+    <Version name="steam">
+      <CMSID>99999</CMSID>
+      <DriverProfile>game.exe</DriverProfile>
+      <Distributor>Steam</Distributor>
+    </Version>
+    <Version name="uwp">
+      <CMSID>99999</CMSID>
+      <DriverProfile>game.exe</DriverProfile>
+      <Distributor>UWP</Distributor>
+      <UWPPackageFamilyName>SomePkg_abc123</UWPPackageFamilyName>
+      <AppUserModelId>SomePkg_abc123!AppGame</AppUserModelId>
+    </Version>
+  </Fingerprint>
+  <Fingerprint name="no_source_game">
+    <Version name="uwp">
+      <CMSID>55555</CMSID>
+      <Distributor>UWP</Distributor>
+    </Version>
+  </Fingerprint>
+</ProfileDB>

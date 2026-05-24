@@ -418,3 +418,31 @@ func TestCloneVersion_ForcedFieldNoOverride(t *testing.T) {
 		t.Errorf("AppUserModelId appeared %d times, want 1", count)
 	}
 }
+
+func TestCloneVersion_ForcedFieldOrder(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	src := FindSourceVersion(fp)
+
+	appID := "TestPkg_abc!TestApp"
+	clone := CloneVersion(src, appID, nil, nil)
+
+	// Collect the order of forced fields as they appear in the clone
+	var order []string
+	for _, e := range clone.Elements {
+		lower := strings.ToLower(e.ElementName())
+		if lower == "distributor" || lower == "uwppackagefamilyname" || lower == "appusermodelid" {
+			order = append(order, lower)
+		}
+	}
+
+	want := []string{"distributor", "uwppackagefamilyname", "appusermodelid"}
+	if len(order) != len(want) {
+		t.Fatalf("forced field count = %d, want %d (got %v)", len(order), len(want), order)
+	}
+	for i, got := range order {
+		if got != want[i] {
+			t.Errorf("forced field at position %d = %q, want %q", i, got, want[i])
+		}
+	}
+}

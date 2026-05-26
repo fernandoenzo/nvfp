@@ -107,7 +107,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` man
 
 - **All commits must be signed** (`git commit -S` or `git commit --gpg-sign`). Unsigned commits must not be pushed.
 - **Every plan execution must end with commit and push**: after all changes are verified, commit with a descriptive message and push to remote.
-
+- **No conventional commit prefixes** (fix:, feat:, refactor:, etc.). Commit messages go in plain natural language.
 ## Testing & QA
 
 - Run all tests: `go test ./...`

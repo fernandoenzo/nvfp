@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ProfileDB>
+<FingerprintDB>
   <Fingerprint name="final_fantasy_vii_remake">
     <Version name="steam">
       <CMSID>12345</CMSID>
@@ -55,4 +55,4 @@
   </Fingerprint>
   <Fingerprint name="empty_game">
   </Fingerprint>
-</ProfileDB>
+</FingerprintDB>

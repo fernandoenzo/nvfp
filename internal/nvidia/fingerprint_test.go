@@ -447,3 +447,214 @@ func TestCloneVersion_ForcedFieldOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestCloneVersion_NonForcedOverrideOrder(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	src := FindSourceVersion(fp)
+
+	// Use multiple non-forced overrides to test determinism
+	overrides := map[string]string{
+		"ZebraField":     "z",
+		"AlphaField":     "a",
+		"MiddleField":    "m",
+		"DriverProfile":  "custom.exe", // override of existing field
+	}
+
+	clone := CloneVersion(src, "TestPkg_abc!App", overrides, nil)
+
+	// Collect the non-forced override elements by their appearance order
+	var overrideNames []string
+	for _, e := range clone.Elements {
+		name := e.ElementName()
+		if name == "AlphaField" || name == "MiddleField" || name == "ZebraField" {
+			overrideNames = append(overrideNames, name)
+		}
+	}
+
+	// Non-forced overrides must appear in sorted order by key
+	if len(overrideNames) != 3 {
+		t.Fatalf("expected 3 non-forced override elements, got %d", len(overrideNames))
+	}
+	want := []string{"AlphaField", "MiddleField", "ZebraField"}
+	for i, got := range overrideNames {
+		if got != want[i] {
+			t.Errorf("non-forced override at position %d = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+func TestCloneVersion_OverrideOverridesDefaultRemove(t *testing.T) {
+	// When an override key matches a field in defaultRemoveFields (e.g., EpicAppId),
+	// the override should win: the source's EpicAppId element is skipped in
+	// copyPreservedElements (because it's in the remove set), but the override
+	// value is then added by applyNonForcedOverrides.
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	src := FindSourceVersion(fp)
+
+	overrides := map[string]string{
+		"EpicAppId": "my-custom-epic-id",
+	}
+
+	clone := CloneVersion(src, "TestPkg!App", overrides, nil)
+
+	// The clone should have the override value for EpicAppId
+	found := false
+	for _, e := range clone.Elements {
+		if e.ElementName() == "EpicAppId" {
+			found = true
+			if e.Content != "my-custom-epic-id" {
+				t.Errorf("EpicAppId = %q, want my-custom-epic-id", e.Content)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected override EpicAppId to be present in clone")
+	}
+
+	// SteamAppIds (also in defaultRemoveFields, but not in overrides) should be absent
+	for _, e := range clone.Elements {
+		if strings.EqualFold(e.ElementName(), "SteamAppIds") {
+			t.Error("SteamAppIds should be removed (it's in defaultRemoveFields with no override)")
+		}
+	}
+}
+
+func TestFingerprintLevelElementsPreserved(t *testing.T) {
+	// Test that DisplayName, ChromaAppID, and other Fingerprint-level
+	// elements are preserved through parse/marshal round-trip.
+	data, err := os.ReadFile(filepath.Join("testdata", "fingerprint_metadata.db"))
+	if err != nil {
+		t.Fatalf("reading testdata: %v", err)
+	}
+
+	var db ProfileDB
+	if err := xml.Unmarshal(data, &db); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	// Verify elements were parsed
+	fp := FindFingerprint(&db, "with_metadata")
+	if fp == nil {
+		t.Fatal("fingerprint with_metadata not found")
+	}
+
+	// Collect Fingerprint-level elements (not Version children)
+	elemNames := make(map[string]string)
+	for _, e := range fp.Elements {
+		elemNames[strings.ToLower(e.ElementName())] = e.Content
+	}
+
+	if elemNames["displayname"] != "Game With Metadata" {
+		t.Errorf("DisplayName = %q, want %q", elemNames["displayname"], "Game With Metadata")
+	}
+	if elemNames["chromaappid"] != "81810b31-1b34-4921-8ab3-c6c3485fe4ce" {
+		t.Errorf("ChromaAppID = %q, want %q", elemNames["chromaappid"], "81810b31-1b34-4921-8ab3-c6c3485fe4ce")
+	}
+	if elemNames["iscreativeapplication"] != "1" {
+		t.Errorf("IsCreativeApplication = %q, want %q", elemNames["iscreativeapplication"], "1")
+	}
+
+	// Verify Versions still present
+	if len(fp.Versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(fp.Versions))
+	}
+	if fp.Versions[0].Name != "steam" {
+		t.Errorf("version name = %q, want steam", fp.Versions[0].Name)
+	}
+
+	// Round-trip: marshal and re-parse
+	output, err := xml.MarshalIndent(&db, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	content := xml.Header + string(output) + "\n"
+
+	var db2 ProfileDB
+	if err := xml.Unmarshal([]byte(content), &db2); err != nil {
+		t.Fatalf("re-unmarshal failed: %v", err)
+	}
+
+	fp2 := FindFingerprint(&db2, "with_metadata")
+	if fp2 == nil {
+		t.Fatal("fingerprint with_metadata not found after round-trip")
+	}
+
+	// Verify elements preserved after round-trip
+	elemNames2 := make(map[string]string)
+	for _, e := range fp2.Elements {
+		elemNames2[strings.ToLower(e.ElementName())] = e.Content
+	}
+	if elemNames2["displayname"] != "Game With Metadata" {
+		t.Errorf("round-trip DisplayName = %q, want %q", elemNames2["displayname"], "Game With Metadata")
+	}
+	if elemNames2["chromaappid"] != "81810b31-1b34-4921-8ab3-c6c3485fe4ce" {
+		t.Errorf("round-trip ChromaAppID = %q, want %q", elemNames2["chromaappid"], "81810b31-1b34-4921-8ab3-c6c3485fe4ce")
+	}
+	if elemNames2["iscreativeapplication"] != "1" {
+		t.Errorf("round-trip IsCreativeApplication = %q, want %q", elemNames2["iscreativeapplication"], "1")
+	}
+
+	// Verify versions still intact after round-trip
+	if len(fp2.Versions) != 1 {
+		t.Fatalf("round-trip: expected 1 version, got %d", len(fp2.Versions))
+	}
+}
+
+func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
+	// When patching a fingerprint, its Fingerprint-level elements
+	// (DisplayName, ChromaAppID, etc.) must be preserved in the output.
+	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint_metadata.db"))
+	if err != nil {
+		t.Fatalf("ParseProfileDB failed: %v", err)
+	}
+
+	result := PatchGame(db, "with_metadata", "TestPkg!App", nil, nil)
+	if result.Status != "patched" {
+		t.Fatalf("expected patched, got %s: %s", result.Status, result.Message)
+	}
+
+	// Write to temp and re-read
+	tmpDir := t.TempDir()
+	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
+	if err := WriteProfileDB(db, tmpPath); err != nil {
+		t.Fatalf("WriteProfileDB failed: %v", err)
+	}
+
+	db2, err := ParseProfileDB(tmpPath)
+	if err != nil {
+		t.Fatalf("re-parse failed: %v", err)
+	}
+
+	fp := FindFingerprint(db2, "with_metadata")
+	if fp == nil {
+		t.Fatal("fingerprint not found after round-trip")
+	}
+
+	elemNames := make(map[string]string)
+	for _, e := range fp.Elements {
+		elemNames[strings.ToLower(e.ElementName())] = e.Content
+	}
+	if elemNames["displayname"] != "Game With Metadata" {
+		t.Errorf("DisplayName = %q after patch round-trip, want %q", elemNames["displayname"], "Game With Metadata")
+	}
+	if elemNames["chromaappid"] != "81810b31-1b34-4921-8ab3-c6c3485fe4ce" {
+		t.Errorf("ChromaAppID = %q after patch round-trip, want %q", elemNames["chromaappid"], "81810b31-1b34-4921-8ab3-c6c3485fe4ce")
+	}
+}
+
+func TestParseProfileDB_FingerprintDBRoot(t *testing.T) {
+	// Verify that the root element <FingerprintDB> is correctly parsed.
+	// This is the real-world root element name (BUG-0 fix).
+	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	if err != nil {
+		t.Fatalf("ParseProfileDB failed: %v", err)
+	}
+	if len(db.Fingerprints) == 0 {
+		t.Error("expected at least one fingerprint")
+	}
+	if db.XMLName.Local != "FingerprintDB" {
+		t.Errorf("root element = %q, want FingerprintDB", db.XMLName.Local)
+	}
+}

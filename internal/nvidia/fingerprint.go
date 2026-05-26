@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -13,14 +14,15 @@ import (
 
 // ProfileDB is the root element of fingerprint.db.
 type ProfileDB struct {
-	XMLName     xml.Name      `xml:"ProfileDB"`
+	XMLName     xml.Name      `xml:"FingerprintDB"`
 	Fingerprints []Fingerprint `xml:"Fingerprint"`
 }
 
 // Fingerprint represents a single game fingerprint entry.
 type Fingerprint struct {
-	Name     string    `xml:"name,attr"`
-	Versions []Version `xml:"Version"`
+	Name     string      `xml:"name,attr"`
+	Elements []XmlElement `xml:",any"`
+	Versions []Version    `xml:"Version"`
 }
 
 // Version represents a version element within a fingerprint.
@@ -259,30 +261,44 @@ func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bo
 	}
 }
 // applyNonForcedOverrides appends override elements that are not forced fields.
+// Iteration order is sorted by key for deterministic output.
 func applyNonForcedOverrides(clone *Version, overrides map[string]string, forcedFields map[string]string) {
-	for k, v := range overrides {
-		if _, forced := forcedFields[strings.ToLower(k)]; forced {
-			continue
+	keys := make([]string, 0, len(overrides))
+	for k := range overrides {
+		if _, forced := forcedFields[strings.ToLower(k)]; !forced {
+			keys = append(keys, k)
 		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
 		clone.Elements = append(clone.Elements, XmlElement{
 			XMLName: xml.Name{Local: k},
-			Content: v,
+			Content: overrides[k],
 		})
 	}
 }
 
 // appendForcedElements emits forced fields exactly once, with override values taking priority.
+// Override lookup is deterministic: exact canonical name first, then case-insensitive
+// fallback with sorted keys as tiebreaker.
 func appendForcedElements(clone *Version, forcedFields map[string]string, overrides map[string]string) {
 	for _, name := range forcedFieldOrder {
 		defaultVal := forcedFields[name]
 		val := defaultVal
 		elemName := canonicalFieldName(name)
 		if overrides != nil {
-			for k, v := range overrides {
-				if strings.ToLower(k) == name {
-					val = v
-					elemName = k
-					break
+			// Try exact canonical name match first
+			if v, ok := overrides[elemName]; ok {
+				val = v
+			} else {
+				// Case-insensitive fallback with deterministic tiebreaking
+				keys := sortedKeys(overrides)
+				for _, k := range keys {
+					if strings.ToLower(k) == name {
+						val = overrides[k]
+						elemName = k
+						break
+					}
 				}
 			}
 		}
@@ -305,6 +321,16 @@ func canonicalFieldName(lower string) string {
 	default:
 		return lower
 	}
+}
+
+// sortedKeys returns the keys of a map[string]string in sorted order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // deepCopyElement creates a deep copy of an XmlElement.

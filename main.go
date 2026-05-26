@@ -50,10 +50,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("finding NVIDIA directory: %w", err)
 	}
-	dbPaths, err := findFingerprintDBs(nvidiaDir)
-	if err != nil {
-		return fmt.Errorf("finding fingerprint databases: %w", err)
-	}
+	dbPaths := findFingerprintDBs(nvidiaDir)
 	if len(dbPaths) == 0 {
 		return fmt.Errorf("no fingerprint.db files found under %s", nvidiaDir)
 	}
@@ -62,12 +59,15 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 // patchAllDBs patches each fingerprint.db path and reports results.
+// Returns an error if every DB failed; partial failures are reported to stderr.
 func patchAllDBs(gameDB *db.GameDB, dbPaths []string) error {
+	var errs []string
 	anyModified := false
 	for _, dbPath := range dbPaths {
 		modified, err := patchDB(gameDB, dbPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", dbPath, err)
+			errs = append(errs, dbPath)
 			continue
 		}
 		if modified {
@@ -76,6 +76,9 @@ func patchAllDBs(gameDB *db.GameDB, dbPaths []string) error {
 	}
 	if !anyModified {
 		fmt.Println("No changes made.")
+	}
+	if len(errs) == len(dbPaths) && len(dbPaths) > 0 {
+		return fmt.Errorf("all %d fingerprint databases failed", len(dbPaths))
 	}
 	return nil
 }
@@ -141,7 +144,29 @@ func checkNvidiaDir(candidate string) string {
 }
 
 
-func findFingerprintDBs(nvidiaDir string) ([]string, error) {
+// findDAOFingerprintDBs discovers fingerprint.db files under the DAO directory.
+func findDAOFingerprintDBs(nvidiaDir string) []string {
+	daoDir := filepath.Join(nvidiaDir, "DAO")
+	entries, err := os.ReadDir(daoDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  Warning: could not read DAO directory: %v\n", err)
+		}
+		return nil
+	}
+	var results []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dbPath := filepath.Join(daoDir, entry.Name(), "fingerprint.db")
+			if _, err := os.Stat(dbPath); err == nil {
+				results = append(results, dbPath)
+			}
+		}
+	}
+	return results
+}
+
+func findFingerprintDBs(nvidiaDir string) []string {
 	var results []string
 
 	// Ontology path
@@ -151,24 +176,9 @@ func findFingerprintDBs(nvidiaDir string) ([]string, error) {
 	}
 
 	// DAO paths
-	daoDir := filepath.Join(nvidiaDir, "DAO")
-	entries, err := os.ReadDir(daoDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  Warning: could not read DAO directory: %v\n", err)
-		}
-	} else {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				dbPath := filepath.Join(daoDir, entry.Name(), "fingerprint.db")
-				if _, err := os.Stat(dbPath); err == nil {
-					results = append(results, dbPath)
-				}
-			}
-		}
-	}
+	results = append(results, findDAOFingerprintDBs(nvidiaDir)...)
 
-	return results, nil
+	return results
 }
 
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
@@ -219,6 +229,8 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 			fmt.Printf("  ⊘ %s\n", result.Message)
 		case "not_found", "no_source":
 			fmt.Printf("  ✗ %s\n", result.Message)
+		default:
+			fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
 		}
 	}
 	return modified

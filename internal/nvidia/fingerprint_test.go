@@ -198,13 +198,13 @@ func TestPatchGame(t *testing.T) {
 	tests := []struct {
 		fingerprint string
 		appID       string
-		wantStatus  string
+		wantStatus  PatchStatus
 	}{
-		{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", "patched"},
-		{"already_uwp_game", "Pkg!App", "already_uwp"},
-		{"nonexistent_game", "Pkg!App", "not_found"},
-		{"no_source_game", "Pkg!App", "already_uwp"},
-		{"empty_game", "Pkg!App", "no_source"},
+		{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", StatusPatched},
+		{"already_uwp_game", "Pkg!App", StatusAlreadyUWP},
+		{"nonexistent_game", "Pkg!App", StatusNotFound},
+		{"no_source_game", "Pkg!App", StatusAlreadyUWP},
+		{"empty_game", "Pkg!App", StatusNoSource},
 	}
 
 	for _, tt := range tests {

@@ -69,6 +69,48 @@ func TestUWPPackageFamilyName(t *testing.T) {
 	}
 }
 
+func TestPackageFamilyName(t *testing.T) {
+	tests := []struct {
+		appID    string
+		expected string
+	}{
+		{"39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", "39EA002F.EXED1_n746a19ndrrjg"},
+		{"Pkg_abc!AppX", "Pkg_abc"},
+		{"NoBangHere", "NoBangHere"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		result := PackageFamilyName(tt.appID)
+		if result != tt.expected {
+			t.Errorf("PackageFamilyName(%q) = %q, want %q", tt.appID, result, tt.expected)
+		}
+	}
+}
+
+func TestLoadFromBytesValidation(t *testing.T) {
+	t.Run("zero version rejected", func(t *testing.T) {
+		data := []byte(`{"version":0,"games":[{"fingerprint":"x","app_id":"P!A"}]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for version 0")
+		}
+	})
+	t.Run("empty games rejected", func(t *testing.T) {
+		data := []byte(`{"version":1,"games":[]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for empty games")
+		}
+	})
+	t.Run("negative version rejected", func(t *testing.T) {
+		data := []byte(`{"version":-1,"games":[{"fingerprint":"x","app_id":"P!A"}]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for negative version")
+		}
+	})
+}
+
 func TestSaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "games.json")
@@ -143,5 +185,18 @@ func TestResolveGamesFallbackToBundled(t *testing.T) {
 	}
 	if db.Games[0].Fingerprint != "bundled" {
 		t.Errorf("expected bundled game, got %s", db.Games[0].Fingerprint)
+	}
+}
+
+func TestResolveGamesRemoteParseError(t *testing.T) {
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App"}]}`)
+	remote := []byte(`not json`)
+	cacheDir := t.TempDir()
+	db, err := ResolveGames(cacheDir, bundled, remote)
+	if err != nil {
+		t.Fatalf("ResolveGames should fall back to bundled on remote parse error: %v", err)
+	}
+	if db.Games[0].Fingerprint != "bundled" {
+		t.Errorf("expected bundled fallback, got %s", db.Games[0].Fingerprint)
 	}
 }

@@ -22,14 +22,21 @@ type Game struct {
 	Remove      []string          `json:"remove,omitempty"`
 }
 
+// PackageFamilyName extracts the package family name from a UWP app ID
+// by taking everything before the first '!'. If no '!' is present,
+// the full app ID is returned.
+func PackageFamilyName(appID string) string {
+	idx := strings.Index(appID, "!")
+	if idx < 0 {
+		return appID
+	}
+	return appID[:idx]
+}
+
 // UWPPackageFamilyName derives the package family name from the app_id
 // by taking everything before the first '!'.
 func (g Game) UWPPackageFamilyName() string {
-	idx := strings.Index(g.AppID, "!")
-	if idx < 0 {
-		return g.AppID
-	}
-	return g.AppID[:idx]
+	return PackageFamilyName(g.AppID)
 }
 
 // LoadFromBytes loads the games database from raw JSON bytes.
@@ -37,6 +44,12 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 	var db GameDB
 	if err := json.Unmarshal(data, &db); err != nil {
 		return nil, fmt.Errorf("parsing games.json: %w", err)
+	}
+	if db.Version < 1 {
+		return nil, fmt.Errorf("invalid games database version: %d", db.Version)
+	}
+	if len(db.Games) == 0 {
+		return nil, fmt.Errorf("games database contains no games")
 	}
 	return &db, nil
 }
@@ -77,6 +90,7 @@ func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*Game
 			}
 			return db, nil
 		}
+		fmt.Fprintf(os.Stderr, "Warning: remote games.json parse failed: %v\n", err)
 	}
 	cachePath := filepath.Join(cacheDir, "games.json")
 	if _, err := os.Stat(cachePath); err == nil {

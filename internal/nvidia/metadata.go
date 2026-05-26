@@ -51,11 +51,7 @@ func computeFileHash(path string) (string, int64, error) {
 		return "", 0, fmt.Errorf("reading %s: %w", path, err)
 	}
 	hash := sha256.Sum256(data)
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", 0, fmt.Errorf("stat %s: %w", path, err)
-	}
-	return hex.EncodeToString(hash[:]), info.Size(), nil
+	return hex.EncodeToString(hash[:]), int64(len(data)), nil
 }
 
 func loadMetadata(path string) (*MetadataJSON, error) {

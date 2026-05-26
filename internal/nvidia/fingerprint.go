@@ -72,16 +72,6 @@ var defaultRemoveFields = []string{
 	"OculusAppId",
 }
 
-// isDefaultRemoveField checks if an element name is in the default remove list.
-func isDefaultRemoveField(name string) bool {
-	for _, f := range defaultRemoveFields {
-		if strings.EqualFold(name, f) {
-			return true
-		}
-	}
-	return false
-}
-
 // ---- Core operations ----
 
 // ParseProfileDB reads and parses a fingerprint.db file.
@@ -278,29 +268,33 @@ func applyNonForcedOverrides(clone *Version, overrides map[string]string, forced
 	}
 }
 
+// resolveOverride finds the override value for a forced field.
+// It tries exact canonical name match first, then case-insensitive fallback
+// using the provided sorted keys for deterministic tiebreaking.
+// Returns (value, elemName, found); if not found, caller should use the default.
+func resolveOverride(canonicalName string, overrides map[string]string, sortedKeys []string) (string, string, bool) {
+	elemName := canonicalFieldName(canonicalName)
+	if v, ok := overrides[elemName]; ok {
+		return v, elemName, true
+	}
+	for _, k := range sortedKeys {
+		if strings.ToLower(k) == canonicalName {
+			return overrides[k], k, true
+		}
+	}
+	return "", "", false
+}
+
 // appendForcedElements emits forced fields exactly once, with override values taking priority.
 // Override lookup is deterministic: exact canonical name first, then case-insensitive
 // fallback with sorted keys as tiebreaker.
 func appendForcedElements(clone *Version, forcedFields map[string]string, overrides map[string]string) {
+	keys := sortedKeys(overrides)
 	for _, name := range forcedFieldOrder {
-		defaultVal := forcedFields[name]
-		val := defaultVal
-		elemName := canonicalFieldName(name)
-		if overrides != nil {
-			// Try exact canonical name match first
-			if v, ok := overrides[elemName]; ok {
-				val = v
-			} else {
-				// Case-insensitive fallback with deterministic tiebreaking
-				keys := sortedKeys(overrides)
-				for _, k := range keys {
-					if strings.ToLower(k) == name {
-						val = overrides[k]
-						elemName = k
-						break
-					}
-				}
-			}
+		val, elemName, found := resolveOverride(name, overrides, keys)
+		if !found {
+			val = forcedFields[name]
+			elemName = canonicalFieldName(name)
 		}
 		clone.Elements = append(clone.Elements, XmlElement{
 			XMLName: xml.Name{Local: elemName},

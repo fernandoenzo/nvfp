@@ -72,12 +72,12 @@ func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*Game
 		db, err := LoadFromBytes(remoteData)
 		if err == nil {
 			cachePath := filepath.Join(cacheDir, "games.json")
-			_ = SaveToPath(db, cachePath)
+			if err := SaveToPath(db, cachePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not cache games database: %v\n", err)
+			}
 			return db, nil
 		}
 	}
-
-	// Try cache
 	cachePath := filepath.Join(cacheDir, "games.json")
 	if _, err := os.Stat(cachePath); err == nil {
 		db, err := LoadFromPath(cachePath)

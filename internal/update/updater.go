@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const (
+var (
 	GamesURL = "https://github.com/fernandoenzo/nvidia-uwp-patch/raw/main/games.json"
 )
 

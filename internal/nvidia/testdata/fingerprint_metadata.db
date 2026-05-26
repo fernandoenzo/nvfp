@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FingerprintDB>
+  <Fingerprint name="with_metadata">
+    <DisplayName>Game With Metadata</DisplayName>
+    <ChromaAppID>81810b31-1b34-4921-8ab3-c6c3485fe4ce</ChromaAppID>
+    <IsCreativeApplication>1</IsCreativeApplication>
+    <Version name="steam">
+      <CMSID>12345</CMSID>
+      <DriverProfile>game.exe</DriverProfile>
+      <Distributor>Steam</Distributor>
+    </Version>
+  </Fingerprint>
+  <Fingerprint name="minimal_game">
+    <DisplayName>Minimal Game</DisplayName>
+    <Version name="epic">
+      <CMSID>67890</CMSID>
+      <Distributor>Epic</Distributor>
+    </Version>
+  </Fingerprint>
+</FingerprintDB>

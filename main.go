@@ -94,11 +94,6 @@ func resolveGames() (*db.GameDB, error) {
 		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
 	} else {
 		remoteData = data
-		// Cache it
-		remoteDB, err := db.LoadFromBytes(remoteData)
-		if err == nil {
-			_ = db.SaveToPath(remoteDB, filepath.Join(cacheDir, "games.json"))
-		}
 	}
 
 	return db.ResolveGames(cacheDir, bundledGames, remoteData)

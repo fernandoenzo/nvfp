@@ -222,16 +222,16 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	for _, game := range games {
 		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Overrides, game.Remove)
 		switch result.Status {
-		case "patched":
-			modified = true
-			fmt.Printf("  ✓ %s\n", result.Message)
-		case "already_uwp":
-			fmt.Printf("  ⊘ %s\n", result.Message)
-		case "not_found", "no_source":
-			fmt.Printf("  ✗ %s\n", result.Message)
-		default:
-			fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
-		}
+			case nvidia.StatusPatched:
+				modified = true
+				fmt.Printf("  ✓ %s\n", result.Message)
+			case nvidia.StatusAlreadyUWP:
+				fmt.Printf("  ⊘ %s\n", result.Message)
+			case nvidia.StatusNotFound, nvidia.StatusNoSource:
+				fmt.Printf("  ✗ %s\n", result.Message)
+			default:
+				fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
+			}
 	}
 	return modified
 }

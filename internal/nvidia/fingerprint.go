@@ -8,13 +8,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
 )
 
 // ---- XML model for fingerprint.db ----
 
 // ProfileDB is the root element of fingerprint.db.
 type ProfileDB struct {
-	XMLName     xml.Name      `xml:"FingerprintDB"`
+	XMLName      xml.Name      `xml:"FingerprintDB"`
 	Fingerprints []Fingerprint `xml:"Fingerprint"`
 }
 
@@ -34,9 +36,9 @@ type Version struct {
 // XmlElement represents a generic XML element, preserving unknown children.
 type XmlElement struct {
 	XMLName  xml.Name
-	Attr     []xml.Attr `xml:",any,attr"`
-	Content  string     `xml:",chardata"`
-	Children []XmlElement `xml:",any"`
+	Attr     []xml.Attr    `xml:",any,attr"`
+	Content  string        `xml:",chardata"`
+	Children []XmlElement  `xml:",any"`
 }
 
 // AttrValue returns the value of an attribute by name, or empty string.
@@ -211,13 +213,11 @@ func buildRemoveSet(extra []string) map[string]bool {
 
 // forcedFieldOrder defines the deterministic order for emitting forced fields.
 var forcedFieldOrder = []string{"distributor", "uwppackagefamilyname", "appusermodelid"}
+
 // buildForcedFields returns the map of forced field names to their default values.
 // Override values take priority and are resolved later in appendForcedElements.
 func buildForcedFields(appID string) map[string]string {
-	pkgFamily := appID
-	if idx := strings.Index(appID, "!"); idx >= 0 {
-		pkgFamily = appID[:idx]
-	}
+	pkgFamily := db.PackageFamilyName(appID)
 	return map[string]string{
 		"distributor":          "UWP",
 		"uwppackagefamilyname": pkgFamily,
@@ -250,6 +250,7 @@ func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bo
 		clone.Elements = append(clone.Elements, deepCopyElement(elem))
 	}
 }
+
 // applyNonForcedOverrides appends override elements that are not forced fields.
 // Iteration order is sorted by key for deterministic output.
 func applyNonForcedOverrides(clone *Version, overrides map[string]string, forcedFields map[string]string) {
@@ -344,11 +345,21 @@ func deepCopyElement(elem XmlElement) XmlElement {
 	return cp
 }
 
+// PatchStatus represents the outcome of a patch operation.
+type PatchStatus string
+
+const (
+	StatusPatched    PatchStatus = "patched"
+	StatusAlreadyUWP PatchStatus = "already_uwp"
+	StatusNotFound   PatchStatus = "not_found"
+	StatusNoSource   PatchStatus = "no_source"
+)
+
 // PatchResult holds the result of a single game patch operation.
 type PatchResult struct {
 	Fingerprint string
-	Status       string // "patched", "already_uwp", "not_found", "no_source"
-	Message      string
+	Status      PatchStatus
+	Message     string
 }
 
 // PatchGame applies the UWP profile patch for a single game.
@@ -356,25 +367,25 @@ type PatchResult struct {
 func PatchGame(db *ProfileDB, fingerprint, appID string, overrides map[string]string, remove []string) PatchResult {
 	fp := FindFingerprint(db, fingerprint)
 	if fp == nil {
-		return patchResult(fingerprint, "not_found", "fingerprint %q not found in database", fingerprint)
+		return patchResult(fingerprint, StatusNotFound, "fingerprint %q not found in database", fingerprint)
 	}
 	if HasUWPVersion(fp) {
-		return patchResult(fingerprint, "already_uwp", "fingerprint %q already has a UWP version (NVIDIA includes it)", fingerprint)
+		return patchResult(fingerprint, StatusAlreadyUWP, "fingerprint %q already has a UWP version (NVIDIA includes it)", fingerprint)
 	}
 	src := FindSourceVersion(fp)
 	if src == nil {
-		return patchResult(fingerprint, "no_source", "no source version found for fingerprint %q", fingerprint)
+		return patchResult(fingerprint, StatusNoSource, "no source version found for fingerprint %q", fingerprint)
 	}
 	clone := CloneVersion(src, appID, overrides, remove)
 	fp.Versions = append(fp.Versions, clone)
-	return patchResult(fingerprint, "patched", "patched %q (cloned from %q)", fingerprint, src.Name)
+	return patchResult(fingerprint, StatusPatched, "patched %q (cloned from %q)", fingerprint, src.Name)
 }
 
 // patchResult builds a PatchResult with a formatted message.
-func patchResult(fingerprint, status, format string, args ...any) PatchResult {
+func patchResult(fingerprint string, status PatchStatus, format string, args ...any) PatchResult {
 	return PatchResult{
 		Fingerprint: fingerprint,
-		Status:       status,
-		Message:      fmt.Sprintf(format, args...),
+		Status:      status,
+		Message:     fmt.Sprintf(format, args...),
 	}
 }

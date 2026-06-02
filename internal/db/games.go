@@ -26,11 +26,8 @@ type Game struct {
 // by taking everything before the first '!'. If no '!' is present,
 // the full app ID is returned.
 func PackageFamilyName(appID string) string {
-	idx := strings.Index(appID, "!")
-	if idx < 0 {
-		return appID
-	}
-	return appID[:idx]
+	prefix, _, _ := strings.Cut(appID, "!")
+	return prefix
 }
 
 // UWPPackageFamilyName derives the package family name from the app_id

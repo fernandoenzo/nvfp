@@ -1,7 +1,8 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,7 +66,7 @@ func SaveToPath(db *GameDB, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating cache directory: %w", err)
 	}
-	data, err := json.MarshalIndent(db, "", "  ")
+	data, err := json.Marshal(db, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("marshaling games.json: %w", err)
 	}

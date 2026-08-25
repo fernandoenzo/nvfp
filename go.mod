@@ -1,6 +1,6 @@
 module github.com/fernandoenzo/nvidia-uwp-patch
 
-go 1.23.10
+go 1.27
 
 require github.com/spf13/cobra v1.10.2
 

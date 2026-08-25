@@ -3,7 +3,8 @@ package nvidia
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,7 +74,7 @@ func loadMetadata(path string) (*MetadataJSON, error) {
 }
 
 func saveMetadata(path string, meta *MetadataJSON) error {
-	data, err := json.MarshalIndent(meta, "", "  ")
+	data, err := json.Marshal(meta, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return err
 	}

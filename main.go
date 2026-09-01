@@ -16,7 +16,7 @@ import (
 var bundledGames []byte
 
 var (
-	dryRun    bool
+	dryRun     bool
 	listOnly   bool
 	gameFilter string
 )
@@ -103,10 +103,10 @@ func resolveGames() (*db.GameDB, error) {
 }
 
 func getCacheDir() (string, error) {
-	// On Windows: %APPDATA%\nvidia-uwp-patch
-	appData := os.Getenv("APPDATA")
-	if appData != "" {
-		return filepath.Join(appData, "nvidia-uwp-patch"), nil
+	// On Windows: %LOCALAPPDATA%\nvidia-uwp-patch (cached data stays on the machine)
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData != "" {
+		return filepath.Join(localAppData, "nvidia-uwp-patch"), nil
 	}
 	// Fallback for non-Windows (testing)
 	home, err := os.UserHomeDir()
@@ -142,7 +142,6 @@ func checkNvidiaDir(candidate string) string {
 	}
 	return ""
 }
-
 
 // findDAOFingerprintDBs discovers fingerprint.db files under the DAO directory.
 func findDAOFingerprintDBs(nvidiaDir string) []string {
@@ -222,16 +221,16 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	for _, game := range games {
 		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Overrides, game.Remove)
 		switch result.Status {
-			case nvidia.StatusPatched:
-				modified = true
-				fmt.Printf("  ✓ %s\n", result.Message)
-			case nvidia.StatusAlreadyUWP:
-				fmt.Printf("  ⊘ %s\n", result.Message)
-			case nvidia.StatusNotFound, nvidia.StatusNoSource:
-				fmt.Printf("  ✗ %s\n", result.Message)
-			default:
-				fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
-			}
+		case nvidia.StatusPatched:
+			modified = true
+			fmt.Printf("  ✓ %s\n", result.Message)
+		case nvidia.StatusAlreadyUWP:
+			fmt.Printf("  ⊘ %s\n", result.Message)
+		case nvidia.StatusNotFound, nvidia.StatusNoSource:
+			fmt.Printf("  ✗ %s\n", result.Message)
+		default:
+			fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
+		}
 	}
 	return modified
 }

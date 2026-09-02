@@ -28,3 +28,6 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local notes (never committed)
+NOTES.md

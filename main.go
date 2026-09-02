@@ -258,10 +258,9 @@ func listGames(gameDB *db.GameDB) error {
 	fmt.Printf("Total games: %d\n\n", len(gameDB.Games))
 
 	for _, game := range gameDB.Games {
-		pkgFamily := game.UWPPackageFamilyName()
 		fmt.Printf("  %s\n", game.Fingerprint)
 		fmt.Printf("    AppID: %s\n", game.AppID)
-		fmt.Printf("    UWPPackageFamilyName: %s\n", pkgFamily)
+		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
 		if len(game.Overrides) > 0 {
 			fmt.Printf("    Overrides: %v\n", game.Overrides)
 		}

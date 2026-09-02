@@ -43,7 +43,8 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading games database: %w", err)
 	}
 	if listOnly {
-		return listGames(gameDB)
+		listGames(gameDB)
+		return nil
 	}
 
 	nvidiaDir, err := findNvidiaDir()
@@ -253,7 +254,7 @@ func writePatch(profileDB *nvidia.ProfileDB, dbPath string) (bool, error) {
 	return true, nil
 }
 
-func listGames(gameDB *db.GameDB) error {
+func listGames(gameDB *db.GameDB) {
 	fmt.Printf("Games database version: %d\n", gameDB.Version)
 	fmt.Printf("Total games: %d\n\n", len(gameDB.Games))
 
@@ -268,6 +269,4 @@ func listGames(gameDB *db.GameDB) error {
 			fmt.Printf("    Remove: %v\n", game.Remove)
 		}
 	}
-
-	return nil
 }

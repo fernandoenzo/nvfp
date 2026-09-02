@@ -232,14 +232,10 @@ func TestListGames(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := listGames(gameDB)
+	listGames(gameDB)
 
 	w.Close()
 	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("listGames() error: %v", err)
-	}
 
 	var buf bytes.Buffer
 	buf.ReadFrom(r)

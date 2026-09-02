@@ -11,7 +11,7 @@ games.json (bundled/embedded) ──┐
                                  ▼
                            ResolveGames ──► GameDB
                                  │
-findNvidiaDir ──► findFingerprintDB ──► dbPath
+findFingerprintDB ──► dbPath
                                  │
                                  ▼
                             patchDB

@@ -47,13 +47,9 @@ func run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	nvidiaDir, err := findNvidiaDir()
+	dbPath, err := findFingerprintDB()
 	if err != nil {
-		return fmt.Errorf("finding NVIDIA directory: %w", err)
-	}
-	dbPath := findFingerprintDB(nvidiaDir)
-	if dbPath == "" {
-		return fmt.Errorf("no fingerprint.db found under %s", nvidiaDir)
+		return err
 	}
 
 	_, err = patchDB(gameDB, dbPath)
@@ -90,38 +86,19 @@ func getCacheDir() (string, error) {
 	return filepath.Join(home, ".cache", "nvidia-uwp-patch"), nil
 }
 
-func findNvidiaDir() (string, error) {
+// findFingerprintDB returns the path of the working fingerprint.db used by the
+// NVIDIA App ontology engine.
+func findFingerprintDB() (string, error) {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
 		return "", fmt.Errorf("LOCALAPPDATA not set")
 	}
-	candidate := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App", "NvBackend")
-	if found := checkNvidiaDir(candidate); found != "" {
-		return found, nil
+	path := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App",
+		"NvBackend", "ApplicationOntology", "data", "fingerprint.db")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("fingerprint.db not found (is NVIDIA App installed?)")
 	}
-	return "", fmt.Errorf("NVIDIA App directory not found")
-}
-
-// checkNvidiaDir returns the directory path if it exists and is a directory, otherwise "".
-func checkNvidiaDir(candidate string) string {
-	info, err := os.Stat(candidate)
-	if err != nil {
-		return ""
-	}
-	if info.IsDir() {
-		return candidate
-	}
-	return ""
-}
-
-// findFingerprintDB returns the path of the working fingerprint.db used by the
-// NVIDIA App ontology engine, or "" if it does not exist.
-func findFingerprintDB(nvidiaDir string) string {
-	ontologyPath := filepath.Join(nvidiaDir, "ApplicationOntology", "data", "fingerprint.db")
-	if _, err := os.Stat(ontologyPath); err == nil {
-		return ontologyPath
-	}
-	return ""
+	return path, nil
 }
 
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {

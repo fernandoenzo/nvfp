@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-CLI tool that patches NVIDIA GeForce Experience fingerprint databases to add or remove UWP (Microsoft Store) game entries. It locates fingerprint.db files on Windows, patches them with game metadata from a bundled or remotely-fetched JSON manifest, and updates DAO metadata SHA256 hashes.
+CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft Store) game entries. It locates the working fingerprint.db (ApplicationOntology\data) on Windows, patches it with game metadata from a bundled or remotely-fetched JSON manifest, and backs up the original before writing.
 
 ## Architecture & Data Flow
 
@@ -11,21 +11,17 @@ games.json (bundled/embedded) ──┐
                                  ▼
                            ResolveGames ──► GameDB
                                  │
-findNvidiaDir ──► findFingerprintDBs ──► []dbPath
+findNvidiaDir ──► findFingerprintDB ──► dbPath
                                  │
                                  ▼
-                           patchAllDBs
+                            patchDB
                                  │
-                    ┌────────────┼────────────┐
-                    ▼            ▼            ▼
-                patchDB      patchDB      patchDB
-                    │
-                    ▼
+                                 ▼
           ParseProfileDB ──► applyPatches ──► writePatch
                     │                              │
                     ▼                              ▼
             PatchGame per game          BackupFile → WriteProfileDB
-                    │                    → UpdateMetadataSHA256
+                    │
                     ▼
           FindFingerprint → HasUWPVersion?
           → FindSourceVersion → CloneVersion
@@ -34,7 +30,7 @@ findNvidiaDir ──► findFingerprintDBs ──► []dbPath
 Three-layer architecture:
 1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
-3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching, metadata updates
+3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
 4. **Network layer** (`internal/update`): Remote games.json fetch with rate-limit safeguards
 
 ## Key Directories
@@ -90,10 +86,8 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` man
 | `games.json` | Bundled game manifest (embedded at build time) |
 | `internal/db/games.go` | `GameDB`, `Game` types, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
 | `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `PatchGame`, `CloneVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
-| `internal/nvidia/metadata.go` | `MetadataJSON`, `UpdateMetadataSHA256` |
 | `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |
-| `internal/nvidia/testdata/fingerprint_metadata.db` | Metadata-specific fixture (2 fingerprints) |
 
 ## Runtime/Tooling Preferences
 

@@ -51,37 +51,13 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("finding NVIDIA directory: %w", err)
 	}
-	dbPaths := findFingerprintDBs(nvidiaDir)
-	if len(dbPaths) == 0 {
-		return fmt.Errorf("no fingerprint.db files found under %s", nvidiaDir)
+	dbPath := findFingerprintDB(nvidiaDir)
+	if dbPath == "" {
+		return fmt.Errorf("no fingerprint.db found under %s", nvidiaDir)
 	}
 
-	return patchAllDBs(gameDB, dbPaths)
-}
-
-// patchAllDBs patches each fingerprint.db path and reports results.
-// Returns an error if every DB failed; partial failures are reported to stderr.
-func patchAllDBs(gameDB *db.GameDB, dbPaths []string) error {
-	var errs []string
-	anyModified := false
-	for _, dbPath := range dbPaths {
-		modified, err := patchDB(gameDB, dbPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", dbPath, err)
-			errs = append(errs, dbPath)
-			continue
-		}
-		if modified {
-			anyModified = true
-		}
-	}
-	if !anyModified {
-		fmt.Println("No changes made.")
-	}
-	if len(errs) == len(dbPaths) && len(dbPaths) > 0 {
-		return fmt.Errorf("all %d fingerprint databases failed", len(dbPaths))
-	}
-	return nil
+	_, err = patchDB(gameDB, dbPath)
+	return err
 }
 
 func resolveGames() (*db.GameDB, error) {
@@ -115,16 +91,13 @@ func getCacheDir() (string, error) {
 }
 
 func findNvidiaDir() (string, error) {
-	envVars := []string{"PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"}
-	for _, envVar := range envVars {
-		val := os.Getenv(envVar)
-		if val == "" {
-			continue
-		}
-		candidate := filepath.Join(val, "NVIDIA Corporation", "NvBackend")
-		if found := checkNvidiaDir(candidate); found != "" {
-			return found, nil
-		}
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return "", fmt.Errorf("LOCALAPPDATA not set")
+	}
+	candidate := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App", "NvBackend")
+	if found := checkNvidiaDir(candidate); found != "" {
+		return found, nil
 	}
 	return "", fmt.Errorf("NVIDIA App directory not found")
 }
@@ -141,41 +114,14 @@ func checkNvidiaDir(candidate string) string {
 	return ""
 }
 
-// findDAOFingerprintDBs discovers fingerprint.db files under the DAO directory.
-func findDAOFingerprintDBs(nvidiaDir string) []string {
-	daoDir := filepath.Join(nvidiaDir, "DAO")
-	entries, err := os.ReadDir(daoDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  Warning: could not read DAO directory: %v\n", err)
-		}
-		return nil
-	}
-	var results []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dbPath := filepath.Join(daoDir, entry.Name(), "fingerprint.db")
-			if _, err := os.Stat(dbPath); err == nil {
-				results = append(results, dbPath)
-			}
-		}
-	}
-	return results
-}
-
-func findFingerprintDBs(nvidiaDir string) []string {
-	var results []string
-
-	// Ontology path
+// findFingerprintDB returns the path of the working fingerprint.db used by the
+// NVIDIA App ontology engine, or "" if it does not exist.
+func findFingerprintDB(nvidiaDir string) string {
 	ontologyPath := filepath.Join(nvidiaDir, "ApplicationOntology", "data", "fingerprint.db")
 	if _, err := os.Stat(ontologyPath); err == nil {
-		results = append(results, ontologyPath)
+		return ontologyPath
 	}
-
-	// DAO paths
-	results = append(results, findDAOFingerprintDBs(nvidiaDir)...)
-
-	return results
+	return ""
 }
 
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
@@ -233,23 +179,13 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	return modified
 }
 
-// writePatch backs up, writes the patched database, and updates metadata.
+// writePatch backs up and writes the patched database.
 func writePatch(profileDB *nvidia.ProfileDB, dbPath string) (bool, error) {
 	if err := nvidia.BackupFile(dbPath); err != nil {
 		return false, fmt.Errorf("backing up %s: %w", dbPath, err)
 	}
 	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
 		return false, fmt.Errorf("writing %s: %w", dbPath, err)
-	}
-
-	dir := filepath.Dir(dbPath)
-	metadataPath := filepath.Join(dir, "metadata.json")
-	if _, err := os.Stat(metadataPath); err == nil {
-		if err := nvidia.UpdateMetadataSHA256(metadataPath, dbPath); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: failed to update metadata.json: %v\n", err)
-		} else {
-			fmt.Printf("  Updated metadata.json SHA256\n")
-		}
 	}
 	return true, nil
 }

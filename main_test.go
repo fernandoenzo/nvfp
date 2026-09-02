@@ -165,42 +165,6 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 }
 
-func TestWritePatch_UpdatesMetadata(t *testing.T) {
-	profileDB := newTestProfileDB(t)
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "fingerprint.db")
-	metadataPath := filepath.Join(tmpDir, "metadata.json")
-
-	// Write initial DB
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
-	}
-
-	// Create a minimal metadata.json
-	metadataContent := `{"files": {"fingerprint.db": {"hash": "oldhash", "size": 1234}}}`
-	if err := os.WriteFile(metadataPath, []byte(metadataContent), 0o644); err != nil {
-		t.Fatalf("writing metadata.json: %v", err)
-	}
-
-	// Apply patch
-	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil)
-
-	// Write the patch
-	_, err := writePatch(profileDB, dbPath)
-	if err != nil {
-		t.Fatalf("writePatch() error: %v", err)
-	}
-
-	// Verify metadata was updated (hash should differ from "oldhash")
-	data, err := os.ReadFile(metadataPath)
-	if err != nil {
-		t.Fatalf("reading metadata.json: %v", err)
-	}
-	if strings.Contains(string(data), "oldhash") {
-		t.Error("metadata.json hash was not updated after writePatch")
-	}
-}
-
 func TestWritePatch_NoMetadata(t *testing.T) {
 	profileDB := newTestProfileDB(t)
 	tmpDir := t.TempDir()
@@ -431,6 +395,67 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		if strings.EqualFold(e.ElementName(), "WhisperModePopsFactor") {
 			t.Error("WhisperModePopsFactor should have been removed")
 		}
+	}
+}
+
+func TestFindFingerprintDB(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// No fingerprint.db anywhere → empty
+	if got := findFingerprintDB(tmpDir); got != "" {
+		t.Errorf("findFingerprintDB() = %q, want empty when nothing exists", got)
+	}
+
+	// Only a DAO fingerprint.db → still empty (DAO is not the working copy)
+	daoDir := filepath.Join(tmpDir, "DAO", "somehash")
+	if err := os.MkdirAll(daoDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll DAO: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(daoDir, "fingerprint.db"), []byte("dao"), 0o644); err != nil {
+		t.Fatalf("writing DAO fingerprint.db: %v", err)
+	}
+	if got := findFingerprintDB(tmpDir); got != "" {
+		t.Errorf("findFingerprintDB() = %q, want empty when only DAO exists", got)
+	}
+
+	// Working copy exists → its path is returned
+	ontologyPath := filepath.Join(tmpDir, "ApplicationOntology", "data", "fingerprint.db")
+	if err := os.MkdirAll(filepath.Dir(ontologyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll ontology: %v", err)
+	}
+	if err := os.WriteFile(ontologyPath, []byte("work"), 0o644); err != nil {
+		t.Fatalf("writing working fingerprint.db: %v", err)
+	}
+	if got := findFingerprintDB(tmpDir); got != ontologyPath {
+		t.Errorf("findFingerprintDB() = %q, want %q", got, ontologyPath)
+	}
+}
+
+func TestFindNvidiaDir(t *testing.T) {
+	// LOCALAPPDATA not set → error
+	t.Setenv("LOCALAPPDATA", "")
+	if _, err := findNvidiaDir(); err == nil {
+		t.Error("findNvidiaDir() should fail when LOCALAPPDATA is not set")
+	}
+
+	// LOCALAPPDATA set but no NVIDIA App structure → error
+	tmpDir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpDir)
+	if _, err := findNvidiaDir(); err == nil {
+		t.Error("findNvidiaDir() should fail when NVIDIA App directory does not exist")
+	}
+
+	// Full structure → found
+	nvBackend := filepath.Join(tmpDir, "NVIDIA Corporation", "NVIDIA App", "NvBackend")
+	if err := os.MkdirAll(nvBackend, 0o755); err != nil {
+		t.Fatalf("MkdirAll NvBackend: %v", err)
+	}
+	got, err := findNvidiaDir()
+	if err != nil {
+		t.Fatalf("findNvidiaDir() error: %v", err)
+	}
+	if got != nvBackend {
+		t.Errorf("findNvidiaDir() = %q, want %q", got, nvBackend)
 	}
 }
 

@@ -91,15 +91,12 @@ func resolveGames() (*db.GameDB, error) {
 	}
 
 	// Try remote
-	var remoteData []byte
 	data, err := update.FetchGamesJSON()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
-	} else {
-		remoteData = data
 	}
 
-	return db.ResolveGames(cacheDir, bundledGames, remoteData)
+	return db.ResolveGames(cacheDir, bundledGames, data)
 }
 
 func getCacheDir() (string, error) {

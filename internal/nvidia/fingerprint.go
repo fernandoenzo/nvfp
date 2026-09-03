@@ -22,23 +22,23 @@ type ProfileDB struct {
 
 // Fingerprint represents a single game fingerprint entry.
 type Fingerprint struct {
-	Name     string      `xml:"name,attr"`
+	Name     string       `xml:"name,attr"`
 	Elements []XmlElement `xml:",any"`
 	Versions []Version    `xml:"Version"`
 }
 
 // Version represents a version element within a fingerprint.
 type Version struct {
-	Name     string      `xml:"name,attr"`
+	Name     string       `xml:"name,attr"`
 	Elements []XmlElement `xml:",any"`
 }
 
 // XmlElement represents a generic XML element, preserving unknown children.
 type XmlElement struct {
 	XMLName  xml.Name
-	Attr     []xml.Attr    `xml:",any,attr"`
-	Content  string        `xml:",chardata"`
-	Children []XmlElement  `xml:",any"`
+	Attr     []xml.Attr   `xml:",any,attr"`
+	Content  string       `xml:",chardata"`
+	Children []XmlElement `xml:",any"`
 }
 
 // AttrValue returns the value of an attribute by name, or empty string.
@@ -140,6 +140,9 @@ func copyFile(srcPath, dstPath string) error {
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("copying file: %w", err)
+	}
+	if err := dst.Sync(); err != nil {
+		return fmt.Errorf("syncing %s: %w", dstPath, err)
 	}
 	return nil
 }

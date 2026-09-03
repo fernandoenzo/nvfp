@@ -42,7 +42,7 @@ func TestPatchOutputContent(t *testing.T) {
 		`<Distributor>UWP</Distributor>`,
 		`<DriverProfile>FF7R_UWP.exe</DriverProfile>`, // Override applied
 		`<CMSID>12345</CMSID>`,                        // Preserved from source
-		`<IsAutomatable>1</IsAutomatable>`,              // Preserved from source
+		`<IsAutomatable>1</IsAutomatable>`,            // Preserved from source
 	}
 
 	for _, s := range mustPresent {

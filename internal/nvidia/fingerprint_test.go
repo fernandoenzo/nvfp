@@ -343,7 +343,7 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 
 	// Override a forced field (Distributor) and a non-forced field
 	overrides := map[string]string{
-		"Distributor": "CustomDist",
+		"Distributor":   "CustomDist",
 		"DriverProfile": "custom.exe",
 	}
 
@@ -455,10 +455,10 @@ func TestCloneVersion_NonForcedOverrideOrder(t *testing.T) {
 
 	// Use multiple non-forced overrides to test determinism
 	overrides := map[string]string{
-		"ZebraField":     "z",
-		"AlphaField":     "a",
-		"MiddleField":    "m",
-		"DriverProfile":  "custom.exe", // override of existing field
+		"ZebraField":    "z",
+		"AlphaField":    "a",
+		"MiddleField":   "m",
+		"DriverProfile": "custom.exe", // override of existing field
 	}
 
 	clone := CloneVersion(src, "TestPkg_abc!App", overrides, nil)

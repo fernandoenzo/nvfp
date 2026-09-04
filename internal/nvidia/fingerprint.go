@@ -184,7 +184,7 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 	return firstNonUWP
 }
 
-// CloneVersion creates a deep copy of a Version for UWP patching.
+// CloneVersion creates a copy of a Version for UWP patching.
 // It removes default fields, applies overrides, adds UWP-specific fields,
 // forces Distributor to UWP, and sets the version name.
 func CloneVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
@@ -240,7 +240,7 @@ func buildOverrideSet(overrides map[string]string, forcedFields map[string]strin
 	return overrideSet
 }
 
-// copyPreservedElements deep-copies source elements that survive filtering.
+// copyPreservedElements copies source elements that survive filtering.
 func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, forcedFields map[string]string, overrideSet map[string]bool) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
@@ -250,7 +250,7 @@ func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bo
 		if _, forced := forcedFields[nameLower]; forced {
 			continue
 		}
-		clone.Elements = append(clone.Elements, deepCopyElement(elem))
+		clone.Elements = append(clone.Elements, elem)
 	}
 }
 
@@ -329,23 +329,6 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// deepCopyElement creates a deep copy of an XmlElement.
-func deepCopyElement(elem XmlElement) XmlElement {
-	cp := XmlElement{
-		XMLName: elem.XMLName,
-		Content: elem.Content,
-	}
-	cp.Attr = make([]xml.Attr, len(elem.Attr))
-	copy(cp.Attr, elem.Attr)
-	if len(elem.Children) > 0 {
-		cp.Children = make([]XmlElement, len(elem.Children))
-		for i, child := range elem.Children {
-			cp.Children[i] = deepCopyElement(child)
-		}
-	}
-	return cp
 }
 
 // PatchStatus represents the outcome of a patch operation.

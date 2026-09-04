@@ -196,9 +196,8 @@ func CloneVersion(src *Version, appID string, overrides map[string]string, remov
 		Name:     "uwp",
 		Elements: make([]XmlElement, 0, len(src.Elements)),
 	}
-	copyPreservedElements(&clone, src, removeSet, forcedFields, overrideSet)
-	applyNonForcedOverrides(&clone, overrides, forcedFields)
-	appendForcedElements(&clone, forcedFields, overrides)
+	copyPreservedElements(&clone, src, removeSet, overrideSet)
+	applyOverrides(&clone, overrideSet)
 	return clone
 }
 
@@ -214,119 +213,57 @@ func buildRemoveSet(extra []string) map[string]bool {
 	return removeSet
 }
 
-// forcedFieldOrder defines the deterministic order for emitting forced fields.
-var forcedFieldOrder = []string{"distributor", "uwppackagefamilyname", "appusermodelid"}
-
 // buildForcedFields returns the map of forced field names to their default values.
-// Override values take priority and are resolved later in appendForcedElements.
+// Forced fields always win over user overrides (see buildOverrideSet).
 func buildForcedFields(appID string) map[string]string {
 	pkgFamily := db.PackageFamilyName(appID)
 	return map[string]string{
-		"distributor":          "UWP",
-		"uwppackagefamilyname": pkgFamily,
-		"appusermodelid":       appID,
+		"Distributor":          "UWP",
+		"UWPPackageFamilyName": pkgFamily,
+		"AppUserModelId":       appID,
 	}
 }
 
-// buildOverrideSet collects non-forced override keys.
-func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string]bool {
-	overrideSet := make(map[string]bool)
-	for k := range overrides {
+// buildOverrideSet builds the unified override lookup: every override key
+// (lowercased) mapped to its original casing and value, with forced fields
+// taking priority over user overrides.
+func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string][2]string {
+	overrideSet := make(map[string][2]string, len(overrides)+len(forcedFields))
+	for k, v := range overrides {
 		nameLower := strings.ToLower(k)
-		if _, forced := forcedFields[nameLower]; !forced {
-			overrideSet[nameLower] = true
-		}
+		overrideSet[nameLower] = [2]string{k, v}
+	}
+	for k, v := range forcedFields {
+		nameLower := strings.ToLower(k)
+		overrideSet[nameLower] = [2]string{k, v}
 	}
 	return overrideSet
 }
 
 // copyPreservedElements copies source elements that survive filtering.
-func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, forcedFields map[string]string, overrideSet map[string]bool) {
+func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, overrideSet map[string][2]string) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
-		_, forced := forcedFields[nameLower]
-		if removeSet[nameLower] || overrideSet[nameLower] || forced {
+		_, overrides := overrideSet[nameLower]
+		if removeSet[nameLower] || overrides {
 			continue
 		}
 		clone.Elements = append(clone.Elements, elem)
 	}
 }
 
-// applyNonForcedOverrides appends override elements that are not forced fields.
-// Iteration order is sorted by key for deterministic output.
-func applyNonForcedOverrides(clone *Version, overrides map[string]string, forcedFields map[string]string) {
-	keys := make([]string, 0, len(overrides))
-	for k := range overrides {
-		if _, forced := forcedFields[strings.ToLower(k)]; !forced {
-			keys = append(keys, k)
-		}
+func applyOverrides(clone *Version, overrideSet map[string][2]string) {
+	keys := make([]string, 0, len(overrideSet))
+	for k := range overrideSet {
+		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
 		clone.Elements = append(clone.Elements, XmlElement{
-			XMLName: xml.Name{Local: k},
-			Content: overrides[k],
+			XMLName: xml.Name{Local: overrideSet[k][0]},
+			Content: overrideSet[k][1],
 		})
 	}
-}
-
-// resolveOverride finds the override value for a forced field.
-// It tries exact canonical name match first, then case-insensitive fallback
-// using the provided sorted keys for deterministic tiebreaking.
-// Returns (value, elemName, found); if not found, caller should use the default.
-func resolveOverride(canonicalName string, overrides map[string]string, sortedKeys []string) (string, string, bool) {
-	elemName := canonicalFieldName(canonicalName)
-	if v, ok := overrides[elemName]; ok {
-		return v, elemName, true
-	}
-	for _, k := range sortedKeys {
-		if strings.ToLower(k) == canonicalName {
-			return overrides[k], k, true
-		}
-	}
-	return "", "", false
-}
-
-// appendForcedElements emits forced fields exactly once, with override values taking priority.
-// Override lookup is deterministic: exact canonical name first, then case-insensitive
-// fallback with sorted keys as tiebreaker.
-func appendForcedElements(clone *Version, forcedFields map[string]string, overrides map[string]string) {
-	keys := sortedKeys(overrides)
-	for _, name := range forcedFieldOrder {
-		val, elemName, found := resolveOverride(name, overrides, keys)
-		if !found {
-			val = forcedFields[name]
-			elemName = canonicalFieldName(name)
-		}
-		clone.Elements = append(clone.Elements, XmlElement{
-			XMLName: xml.Name{Local: elemName},
-			Content: val,
-		})
-	}
-}
-
-// canonicalFieldName maps a lowercased forced field name back to its canonical casing.
-func canonicalFieldName(lower string) string {
-	switch lower {
-	case "distributor":
-		return "Distributor"
-	case "uwppackagefamilyname":
-		return "UWPPackageFamilyName"
-	case "appusermodelid":
-		return "AppUserModelId"
-	default:
-		return lower
-	}
-}
-
-// sortedKeys returns the keys of a map[string]string in sorted order.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // PatchStatus represents the outcome of a patch operation.

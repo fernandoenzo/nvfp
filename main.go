@@ -160,8 +160,8 @@ func filterGames(gameDB *db.GameDB) ([]db.Game, error) {
 // applyPatches patches all games and returns whether any were modified.
 func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	modified := false
-	for _, game := range games {
-		result := nvidia.PatchGame(profileDB, game)
+	for i := range games {
+		result := nvidia.PatchGame(profileDB, &games[i])
 		switch result.Status {
 		case nvidia.StatusPatched:
 			modified = true

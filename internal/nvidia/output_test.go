@@ -15,7 +15,7 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	result := PatchGame(db, gamesdb.Game{
+	result := PatchGame(db, &gamesdb.Game{
 		Fingerprint:    "final_fantasy_vii_remake",
 		AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
 		Versions:       []string{"uwp"},

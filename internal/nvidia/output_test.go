@@ -13,9 +13,9 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	result := PatchGame(db, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", map[string]string{
+	result := PatchGame(db, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, []string{"WhisperModePopsFactor"}, map[string]string{
 		"DriverProfile": "FF7R_UWP.exe",
-	}, []string{"WhisperModePopsFactor"})
+	})
 
 	if result.Status != "patched" {
 		t.Fatalf("expected patched, got %s", result.Status)

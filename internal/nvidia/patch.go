@@ -91,9 +91,21 @@ func ensureVersion(fp *Fingerprint, game *db.Game, name string) versionOutcome {
 
 // summarize composes the final PatchResult from the per-version outcomes.
 func summarize(fingerprint string, added, updated, already, missing []string) PatchResult {
+	if len(added)+len(updated) > 0 {
+		var parts []string
+		if len(added) > 0 {
+			parts = append(parts, "added "+strings.Join(added, ", ")+" version(s)")
+		}
+		if len(updated) > 0 {
+			parts = append(parts, "updated "+strings.Join(updated, ", ")+" version(s)")
+		}
+		msg := fmt.Sprintf("%s of %q", strings.Join(parts, ", "), fingerprint)
+		if len(missing) > 0 {
+			msg += fmt.Sprintf(" (%s not found)", strings.Join(missing, ", "))
+		}
+		return PatchResult{Status: StatusPatched, Message: msg}
+	}
 	switch {
-	case len(added)+len(updated) > 0:
-		return patchResult(StatusPatched, "%s", describeChanges(fingerprint, added, updated, missing))
 	case len(missing) > 0:
 		return patchResult(StatusVersionNotFound, "fingerprint %q has none of the requested versions: %s", fingerprint, strings.Join(missing, ", "))
 	case len(already) > 0:
@@ -101,22 +113,6 @@ func summarize(fingerprint string, added, updated, already, missing []string) Pa
 	default:
 		return patchResult(StatusVersionNotFound, "fingerprint %q has none of the requested versions", fingerprint)
 	}
-}
-
-// describeChanges composes the patch message for a game.
-func describeChanges(fingerprint string, added, updated, missing []string) string {
-	var parts []string
-	if len(added) > 0 {
-		parts = append(parts, "added "+strings.Join(added, ", ")+" version(s)")
-	}
-	if len(updated) > 0 {
-		parts = append(parts, "updated "+strings.Join(updated, ", ")+" version(s)")
-	}
-	msg := fmt.Sprintf("%s of %q", strings.Join(parts, ", "), fingerprint)
-	if len(missing) > 0 {
-		msg += fmt.Sprintf(" (%s not found)", strings.Join(missing, ", "))
-	}
-	return msg
 }
 
 // findVersion returns the version with the given name (case-insensitive), or nil.

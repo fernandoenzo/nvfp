@@ -23,8 +23,8 @@ findFingerprintDB ──► dbPath
             PatchGame per game          BackupFile → WriteProfileDB
                     │
                     ▼
-          FindFingerprint → findUWPVersion?
-          → FindSourceVersion → AddUWPVersion
+          FindFingerprint → ensureVersion
+          → FindSourceVersion → AddUWPVersion / UpdateVersion
 ```
 
 Four-layer architecture:
@@ -51,7 +51,8 @@ make build
 # Equivalent: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o nvidia-uwp-patch.exe .
 
 # Run tests
-go test ./...
+make test
+# Equivalent: go test ./...
 
 # Run tests with verbose output
 go test -v ./...
@@ -71,8 +72,9 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 - **Table-driven tests**: Use `[]struct{ name string; ... }` with `t.Run(tc.name, ...)`.
 - **Temp files**: Always use `t.TempDir()` for isolation; never hardcode paths.
 - **XML model**: Generic `XmlElement` struct (XMLName, Attr, Content, Children) for forward compatibility — no domain-specific structs for XML nodes.
-- **Patch result**: `PatchResult` with `Status` field: `patched`, `already_uwp`, `not_found`, `no_source`.
-- **Game resolution fallback**: Remote → cache → bundled (in that priority).
+- **PatchGame signature**: Takes `*ProfileDB` + `db.Game` (value, not pointer). All game fields (fingerprint, appID, versions, remove, overrides) come from the struct.
+- **Patch result**: `PatchResult` with `Status` + `Message` fields: `patched`, `already_uwp`, `not_found`, `no_source`, `version_not_found`.
+- **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appID; user overrides take priority over these defaults.
 - **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appID) vs `UpdateVersion` (existing version: only explicit removals, forced fields preserved).
 - **Deterministic output**: override elements are emitted sorted by lowercased key.
@@ -86,9 +88,9 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 |---|---|
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
-| `internal/db/games.go` | `GameDB`, `Game` types, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
+| `internal/db/games.go` | `GameDB`, `Game` types, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
 | `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `AddUWPVersion`, `UpdateVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
-| `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus` and status constants |
+| `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `ensureVersion`, `summarize`, `findVersion` |
 | `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |
 

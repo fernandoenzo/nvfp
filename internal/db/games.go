@@ -83,27 +83,25 @@ func SaveToPath(db *GameDB, path string) error {
 }
 
 // ResolveGames loads the games database with priority: remote > cache > bundled.
+// An empty cacheDir disables the cache layer (no read, no write).
 func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*GameDB, error) {
-	// Try remote first
 	if remoteData != nil {
-		db, err := LoadFromBytes(remoteData)
-		if err == nil {
-			cachePath := filepath.Join(cacheDir, "games.json")
-			if err := SaveToPath(db, cachePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not cache games database: %v\n", err)
+		gameDB, err := LoadFromBytes(remoteData)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: remote games.json parse failed: %v\n", err)
+		} else {
+			if cacheDir != "" {
+				if err := SaveToPath(gameDB, filepath.Join(cacheDir, "games.json")); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not cache games database: %v\n", err)
+				}
 			}
-			return db, nil
-		}
-		fmt.Fprintf(os.Stderr, "Warning: remote games.json parse failed: %v\n", err)
-	}
-	cachePath := filepath.Join(cacheDir, "games.json")
-	if _, err := os.Stat(cachePath); err == nil {
-		db, err := LoadFromPath(cachePath)
-		if err == nil {
-			return db, nil
+			return gameDB, nil
 		}
 	}
-
-	// Bundled fallback
+	if cacheDir != "" {
+		if gameDB, err := LoadFromPath(filepath.Join(cacheDir, "games.json")); err == nil {
+			return gameDB, nil
+		}
+	}
 	return LoadFromBytes(bundledData)
 }

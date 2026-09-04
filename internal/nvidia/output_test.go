@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	gamesdb "github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
 )
 
 func TestPatchOutputContent(t *testing.T) {
@@ -13,8 +15,12 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	result := PatchGame(db, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, []string{"WhisperModePopsFactor"}, map[string]string{
-		"DriverProfile": "FF7R_UWP.exe",
+	result := PatchGame(db, gamesdb.Game{
+		Fingerprint: "final_fantasy_vii_remake",
+		AppID:       "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+		Versions:    []string{"uwp"},
+		Remove:      []string{"WhisperModePopsFactor"},
+		Overrides:   map[string]string{"DriverProfile": "FF7R_UWP.exe"},
 	})
 
 	if result.Status != "patched" {

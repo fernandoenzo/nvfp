@@ -11,23 +11,14 @@ var (
 	GamesURL = "https://github.com/fernandoenzo/nvidia-uwp-patch/raw/main/games.json"
 )
 
-// newGamesRequest creates an HTTP GET request for the games.json URL.
-func newGamesRequest() (*http.Request, error) {
+// FetchGamesJSON downloads the latest games.json from GitHub.
+// Returns the raw JSON bytes or an error if the download fails.
+func FetchGamesJSON() ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, GamesURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("User-Agent", "nvidia-uwp-patch")
-	return req, nil
-}
-
-// FetchGamesJSON downloads the latest games.json from GitHub.
-// Returns the raw JSON bytes or an error if the download fails.
-func FetchGamesJSON() ([]byte, error) {
-	req, err := newGamesRequest()
-	if err != nil {
-		return nil, err
-	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

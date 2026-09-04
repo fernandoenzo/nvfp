@@ -207,9 +207,9 @@ func TestPatchGame(t *testing.T) {
 		wantStatus  PatchStatus
 	}{
 		{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, StatusPatched},
-		{"already_uwp_game", "Pkg!App", []string{"uwp"}, StatusAlreadyUWP},
+		{"already_uwp_game", "Pkg!App", []string{"uwp"}, StatusAlreadyPresent},
 		{"nonexistent_game", "Pkg!App", []string{"uwp"}, StatusNotFound},
-		{"no_source_game", "Pkg!App", []string{"uwp"}, StatusAlreadyUWP},
+		{"no_source_game", "Pkg!App", []string{"uwp"}, StatusAlreadyPresent},
 		{"empty_game", "Pkg!App", []string{"uwp"}, StatusNoSource},
 	}
 
@@ -273,8 +273,30 @@ func TestPatchGame_UpdateExistingUWP_NoChanges(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 
 	result := PatchGame(db, gamesdb.Game{Fingerprint: "already_uwp_game", AppID: "Pkg!App", Versions: []string{"uwp"}})
-	if result.Status != StatusAlreadyUWP {
-		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyUWP)
+	if result.Status != StatusAlreadyPresent {
+		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyPresent)
+	}
+}
+
+func TestPatchGame_UpdateExistingUWP_Idempotent(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+
+	game := gamesdb.Game{
+		Fingerprint: "already_uwp_game",
+		AppID:       "Pkg!App",
+		Versions:    []string{"uwp"},
+		Overrides:   map[string]string{"DriverProfile": "game_uwp.exe"},
+	}
+
+	first := PatchGame(db, game)
+	if first.Status != StatusPatched {
+		t.Fatalf("first status = %q, want %q", first.Status, StatusPatched)
+	}
+
+	// Same overrides again: nothing changes, so the result is "already present".
+	second := PatchGame(db, game)
+	if second.Status != StatusAlreadyPresent {
+		t.Errorf("second status = %q, want %q", second.Status, StatusAlreadyPresent)
 	}
 }
 
@@ -432,8 +454,8 @@ func TestPatchGame_EnsureVersions_NoChanges(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 
 	result := PatchGame(db, gamesdb.Game{Fingerprint: "already_uwp_game", AppID: "Pkg!App", Versions: []string{"steam", "uwp"}})
-	if result.Status != StatusAlreadyUWP {
-		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyUWP)
+	if result.Status != StatusAlreadyPresent {
+		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyPresent)
 	}
 }
 

@@ -2,6 +2,7 @@ package nvidia
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
@@ -12,7 +13,7 @@ type PatchStatus string
 
 const (
 	StatusPatched         PatchStatus = "patched"
-	StatusAlreadyUWP      PatchStatus = "already_uwp"
+	StatusAlreadyPresent  PatchStatus = "already_uwp"
 	StatusNotFound        PatchStatus = "not_found"
 	StatusNoSource        PatchStatus = "no_source"
 	StatusVersionNotFound PatchStatus = "version_not_found"
@@ -71,7 +72,11 @@ func ensureVersion(fp *Fingerprint, game db.Game, name string) (versionOutcome, 
 		if len(game.Overrides) == 0 && len(game.Remove) == 0 {
 			return outcomeAlready, nil
 		}
-		*v = UpdateVersion(v, game.Overrides, game.Remove)
+		updated := UpdateVersion(v, game.Overrides, game.Remove)
+		if reflect.DeepEqual(updated, *v) {
+			return outcomeAlready, nil
+		}
+		*v = updated
 		return outcomeUpdated, nil
 	}
 	if !strings.EqualFold(name, "uwp") {
@@ -93,7 +98,7 @@ func summarize(fingerprint string, added, updated, already, missing []string) Pa
 	case len(missing) > 0:
 		return patchResult(StatusVersionNotFound, "fingerprint %q has none of the requested versions: %s", fingerprint, strings.Join(missing, ", "))
 	case len(already) > 0:
-		return patchResult(StatusAlreadyUWP, "fingerprint %q already has %s version(s)", fingerprint, strings.Join(already, ", "))
+		return patchResult(StatusAlreadyPresent, "fingerprint %q already has %s version(s)", fingerprint, strings.Join(already, ", "))
 	default:
 		return patchResult(StatusVersionNotFound, "fingerprint %q has none of the requested versions", fingerprint)
 	}

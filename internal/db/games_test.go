@@ -183,6 +183,29 @@ func TestResolveGamesRemote(t *testing.T) {
 	}
 }
 
+func TestResolveGamesNoCacheDir(t *testing.T) {
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
+	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_id":"Pkg!App2","versions":["uwp"]}]}`)
+
+	// Empty cacheDir: remote is used but nothing is written to disk.
+	db, err := ResolveGames("", bundled, remote)
+	if err != nil {
+		t.Fatalf("ResolveGames failed: %v", err)
+	}
+	if db.Games[0].Fingerprint != "remote" {
+		t.Errorf("expected remote game, got %s", db.Games[0].Fingerprint)
+	}
+
+	// Empty cacheDir with no remote: bundled fallback, no cache read.
+	db, err = ResolveGames("", bundled, nil)
+	if err != nil {
+		t.Fatalf("ResolveGames failed: %v", err)
+	}
+	if db.Games[0].Fingerprint != "bundled" {
+		t.Errorf("expected bundled game, got %s", db.Games[0].Fingerprint)
+	}
+}
+
 func TestResolveGamesFallbackToBundled(t *testing.T) {
 	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
 	cacheDir := t.TempDir()

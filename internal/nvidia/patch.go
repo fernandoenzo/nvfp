@@ -39,7 +39,7 @@ func PatchGame(db *ProfileDB, fingerprint, appID string, versions, remove []stri
 				already = append(already, name)
 				continue
 			}
-			*v = UpdateUWPVersion(v, overrides, remove)
+			*v = UpdateVersion(v, overrides, remove)
 			updated = append(updated, name)
 			continue
 		}

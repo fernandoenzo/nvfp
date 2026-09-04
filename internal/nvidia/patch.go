@@ -13,7 +13,7 @@ type PatchStatus string
 
 const (
 	StatusPatched         PatchStatus = "patched"
-	StatusAlreadyPresent  PatchStatus = "already_uwp"
+	StatusAlreadyPresent  PatchStatus = "already_present"
 	StatusNotFound        PatchStatus = "not_found"
 	StatusNoSource        PatchStatus = "no_source"
 	StatusVersionNotFound PatchStatus = "version_not_found"
@@ -72,6 +72,12 @@ func ensureVersion(fp *Fingerprint, game *db.Game, name string) versionOutcome {
 			return outcomeAlready
 		}
 		updated := UpdateVersion(v, game.Overrides, game.Remove)
+		// DeepEqual treats nil and empty slices as different, but both mean
+		// "no elements" — patch a version to empty, write, re-parse, patch
+		// again → Elements is nil and DeepEqual would say "not equal".
+		if len(updated.Elements) == 0 && len(v.Elements) == 0 {
+			return outcomeAlready
+		}
 		if reflect.DeepEqual(updated, *v) {
 			return outcomeAlready
 		}

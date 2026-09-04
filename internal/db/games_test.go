@@ -1,8 +1,10 @@
 package db
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -231,4 +233,70 @@ func TestResolveGamesRemoteParseError(t *testing.T) {
 	if db.Games[0].Fingerprint != "bundled" {
 		t.Errorf("expected bundled fallback, got %s", db.Games[0].Fingerprint)
 	}
+}
+
+func TestResolveGamesCorruptCache(t *testing.T) {
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
+
+	// captureStderr swaps os.Stderr for a pipe and returns the captured output.
+	captureStderr := func(t *testing.T, fn func()) string {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		orig := os.Stderr
+		os.Stderr = w
+		defer func() { os.Stderr = orig }()
+
+		fn()
+
+		w.Close()
+		out, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("reading stderr pipe: %v", err)
+		}
+		return string(out)
+	}
+
+	t.Run("corrupt cache falls back to bundled with warning", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(cacheDir, "games.json"), []byte(`not json`), 0o644); err != nil {
+			t.Fatalf("writing corrupt cache: %v", err)
+		}
+
+		var gameDB *GameDB
+		var err error
+		stderr := captureStderr(t, func() {
+			gameDB, err = ResolveGames(cacheDir, bundled, nil)
+		})
+		if err != nil {
+			t.Fatalf("ResolveGames should fall back to bundled on corrupt cache: %v", err)
+		}
+		if gameDB.Games[0].Fingerprint != "bundled" {
+			t.Errorf("expected bundled fallback, got %s", gameDB.Games[0].Fingerprint)
+		}
+		if !strings.Contains(stderr, "unusable") {
+			t.Errorf("expected corrupt-cache warning on stderr, got %q", stderr)
+		}
+	})
+
+	t.Run("missing cache does not warn", func(t *testing.T) {
+		cacheDir := t.TempDir() // empty: cache file does not exist
+
+		var gameDB *GameDB
+		var err error
+		stderr := captureStderr(t, func() {
+			gameDB, err = ResolveGames(cacheDir, bundled, nil)
+		})
+		if err != nil {
+			t.Fatalf("ResolveGames failed: %v", err)
+		}
+		if gameDB.Games[0].Fingerprint != "bundled" {
+			t.Errorf("expected bundled fallback, got %s", gameDB.Games[0].Fingerprint)
+		}
+		if stderr != "" {
+			t.Errorf("missing cache should not warn, got %q", stderr)
+		}
+	})
 }

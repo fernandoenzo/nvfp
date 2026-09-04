@@ -201,17 +201,18 @@ func TestPatchGame(t *testing.T) {
 	tests := []struct {
 		fingerprint string
 		appID       string
+		versions    []string
 		wantStatus  PatchStatus
 	}{
-		{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", StatusPatched},
-		{"already_uwp_game", "Pkg!App", StatusAlreadyUWP},
-		{"nonexistent_game", "Pkg!App", StatusNotFound},
-		{"no_source_game", "Pkg!App", StatusAlreadyUWP},
-		{"empty_game", "Pkg!App", StatusNoSource},
+		{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, StatusPatched},
+		{"already_uwp_game", "Pkg!App", []string{"uwp"}, StatusAlreadyUWP},
+		{"nonexistent_game", "Pkg!App", []string{"uwp"}, StatusNotFound},
+		{"no_source_game", "Pkg!App", []string{"uwp"}, StatusAlreadyUWP},
+		{"empty_game", "Pkg!App", []string{"uwp"}, StatusNoSource},
 	}
 
 	for _, tt := range tests {
-		result := PatchGame(db, tt.fingerprint, tt.appID, nil, nil, nil)
+		result := PatchGame(db, tt.fingerprint, tt.appID, tt.versions, nil, nil)
 		if result.Status != tt.wantStatus {
 			t.Errorf("PatchGame(%q) status = %q, want %q", tt.fingerprint, result.Status, tt.wantStatus)
 		}
@@ -227,7 +228,7 @@ func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 	}
 	remove := []string{"CMSID"}
 
-	result := PatchGame(db, "already_uwp_game", "Pkg!App", nil, remove, overrides)
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", []string{"uwp"}, remove, overrides)
 	if result.Status != StatusPatched {
 		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
 	}
@@ -269,7 +270,7 @@ func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 func TestPatchGame_UpdateExistingUWP_NoChanges(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 
-	result := PatchGame(db, "already_uwp_game", "Pkg!App", nil, nil, nil)
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", []string{"uwp"}, nil, nil)
 	if result.Status != StatusAlreadyUWP {
 		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyUWP)
 	}
@@ -286,7 +287,7 @@ func TestPatchGame_UpdateExistingUWP_KeepsDefaultRemoveFields(t *testing.T) {
 	})
 
 	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
-	result := PatchGame(db, "already_uwp_game", "Pkg!App", nil, nil, overrides)
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", []string{"uwp"}, nil, overrides)
 	if result.Status != StatusPatched {
 		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
 	}
@@ -438,7 +439,7 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 	// Parse, modify, write, re-parse
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 
-	PatchGame(db, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil, nil)
+	PatchGame(db, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, nil, nil)
 
 	// Write to temp file
 	tmpDir := t.TempDir()
@@ -831,7 +832,7 @@ func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 		t.Fatalf("ParseProfileDB failed: %v", err)
 	}
 
-	result := PatchGame(db, "with_metadata", "TestPkg!App", nil, nil, nil)
+	result := PatchGame(db, "with_metadata", "TestPkg!App", []string{"uwp"}, nil, nil)
 	if result.Status != "patched" {
 		t.Fatalf("expected patched, got %s: %s", result.Status, result.Message)
 	}

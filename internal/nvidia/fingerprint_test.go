@@ -65,7 +65,7 @@ func TestFindFingerprint(t *testing.T) {
 	}
 }
 
-func TestHasUWPVersion(t *testing.T) {
+func TestFindUWPVersion(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 
 	tests := []struct {
@@ -82,8 +82,8 @@ func TestHasUWPVersion(t *testing.T) {
 		if fp == nil {
 			t.Fatalf("fingerprint %q not found", tt.name)
 		}
-		if HasUWPVersion(fp) != tt.hasUWP {
-			t.Errorf("HasUWPVersion(%q) = %v, want %v", tt.name, !tt.hasUWP, tt.hasUWP)
+		if (findUWPVersion(fp) != nil) != tt.hasUWP {
+			t.Errorf("findUWPVersion(%q) presence = %v, want %v", tt.name, findUWPVersion(fp) != nil, tt.hasUWP)
 		}
 	}
 }

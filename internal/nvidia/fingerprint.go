@@ -252,6 +252,7 @@ func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bo
 	}
 }
 
+// applyOverrides appends override elements, sorted by key for deterministic output.
 func applyOverrides(clone *Version, overrideSet map[string][2]string) {
 	keys := make([]string, 0, len(overrideSet))
 	for k := range overrideSet {

@@ -88,41 +88,41 @@ func TestHasUWPVersion(t *testing.T) {
 	}
 }
 
-func TestCloneVersion(t *testing.T) {
+func TestAddUWPVersion(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
 	appID := "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping"
-	clone := CloneVersion(src, appID, nil, nil)
+	got := AddUWPVersion(src, appID, nil, nil)
 
 	// Check name
-	if clone.Name != "uwp" {
-		t.Errorf("clone name = %q, want uwp", clone.Name)
+	if got.Name != "uwp" {
+		t.Errorf("got name = %q, want uwp", got.Name)
 	}
 
 	// Check that removed fields are gone
 	elementNames := make(map[string]bool)
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		elementNames[strings.ToLower(e.ElementName())] = true
 	}
 
 	for _, removed := range []string{"Files", "Launch", "SteamAppIds", "Directories", "InstallDirRegValues"} {
 		if elementNames[strings.ToLower(removed)] {
-			t.Errorf("clone should not contain %s", removed)
+			t.Errorf("got should not contain %s", removed)
 		}
 	}
 
 	// Check that UWP-specific fields are present
 	if !elementNames["uwppackagefamilyname"] {
-		t.Error("clone should contain UWPPackageFamilyName")
+		t.Error("got should contain UWPPackageFamilyName")
 	}
 	if !elementNames["appusermodelid"] {
-		t.Error("clone should contain AppUserModelId")
+		t.Error("got should contain AppUserModelId")
 	}
 
 	// Check Distributor is UWP
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		if strings.ToLower(e.ElementName()) == "distributor" {
 			if e.Content != "UWP" {
 				t.Errorf("Distributor = %q, want UWP", e.Content)
@@ -132,14 +132,14 @@ func TestCloneVersion(t *testing.T) {
 
 	// Check preserved fields
 	if !elementNames["cmsid"] {
-		t.Error("clone should contain CMSID")
+		t.Error("got should contain CMSID")
 	}
 	if !elementNames["driverprofile"] {
-		t.Error("clone should contain DriverProfile")
+		t.Error("got should contain DriverProfile")
 	}
 
 	// Check UWPPackageFamilyName derivation
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		if e.ElementName() == "UWPPackageFamilyName" {
 			if e.Content != "39EA002F.EXED1_n746a19ndrrjg" {
 				t.Errorf("UWPPackageFamilyName = %q, want 39EA002F.EXED1_n746a19ndrrjg", e.Content)
@@ -153,7 +153,7 @@ func TestCloneVersion(t *testing.T) {
 	}
 }
 
-func TestCloneWithOverrides(t *testing.T) {
+func TestAddUWPWithOverrides(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
@@ -163,10 +163,10 @@ func TestCloneWithOverrides(t *testing.T) {
 		"SpecialFlag":   "1",
 	}
 
-	clone := CloneVersion(src, "Pkg_abc!AppX", overrides, nil)
+	got := AddUWPVersion(src, "Pkg_abc!AppX", overrides, nil)
 
 	elementMap := make(map[string]string)
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		elementMap[e.ElementName()] = e.Content
 	}
 
@@ -178,14 +178,14 @@ func TestCloneWithOverrides(t *testing.T) {
 	}
 }
 
-func TestCloneWithRemove(t *testing.T) {
+func TestAddUWPWithRemove(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
-	clone := CloneVersion(src, "Pkg_abc!AppX", nil, []string{"WhisperModePopsFactor"})
+	got := AddUWPVersion(src, "Pkg_abc!AppX", nil, []string{"WhisperModePopsFactor"})
 
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		if e.ElementName() == "WhisperModePopsFactor" {
 			t.Error("WhisperModePopsFactor should have been removed")
 		}
@@ -212,6 +212,94 @@ func TestPatchGame(t *testing.T) {
 		if result.Status != tt.wantStatus {
 			t.Errorf("PatchGame(%q) status = %q, want %q", tt.fingerprint, result.Status, tt.wantStatus)
 		}
+	}
+}
+
+func TestPatchGame_UpdateExistingUWP(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+
+	overrides := map[string]string{
+		"DriverProfile": "game_uwp.exe",
+		"NewField":      "new-value",
+	}
+	remove := []string{"CMSID"}
+
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", overrides, remove)
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
+	}
+
+	uwp := findUWPVersion(FindFingerprint(db, "already_uwp_game"))
+	if uwp == nil {
+		t.Fatal("UWP version not found")
+	}
+
+	seen := make(map[string]string)
+	for _, e := range uwp.Elements {
+		seen[strings.ToLower(e.ElementName())] = e.Content
+	}
+
+	// Override replaced the existing element content
+	if seen["driverprofile"] != "game_uwp.exe" {
+		t.Errorf("DriverProfile = %q, want game_uwp.exe", seen["driverprofile"])
+	}
+	// New override was appended
+	if seen["newfield"] != "new-value" {
+		t.Errorf("NewField = %q, want new-value", seen["newfield"])
+	}
+	// Removed element is gone
+	if _, ok := seen["cmsid"]; ok {
+		t.Error("CMSID should have been removed")
+	}
+	// Forced fields of the existing version are untouched
+	if seen["distributor"] != "UWP" {
+		t.Errorf("Distributor = %q, want UWP", seen["distributor"])
+	}
+	if seen["uwppackagefamilyname"] != "SomePkg_abc123" {
+		t.Errorf("UWPPackageFamilyName = %q, want SomePkg_abc123", seen["uwppackagefamilyname"])
+	}
+	if seen["appusermodelid"] != "SomePkg_abc123!AppGame" {
+		t.Errorf("AppUserModelId = %q, want SomePkg_abc123!AppGame", seen["appusermodelid"])
+	}
+}
+
+func TestPatchGame_UpdateExistingUWP_NoChanges(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", nil, nil)
+	if result.Status != StatusAlreadyUWP {
+		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyUWP)
+	}
+}
+
+func TestPatchGame_UpdateExistingUWP_KeepsDefaultRemoveFields(t *testing.T) {
+	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "already_uwp_game")
+	uwp := findUWPVersion(fp)
+	// Inject a field that AddUWPVersion would remove by default
+	uwp.Elements = append(uwp.Elements, XmlElement{
+		XMLName: xml.Name{Local: "Files"},
+		Content: "some_files",
+	})
+
+	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
+	result := PatchGame(db, "already_uwp_game", "Pkg!App", overrides, nil)
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
+	}
+
+	// Update mode must not apply default removals: Files survives
+	found := false
+	for _, e := range findUWPVersion(fp).Elements {
+		if e.ElementName() == "Files" {
+			found = true
+			if e.Content != "some_files" {
+				t.Errorf("Files = %q, want some_files", e.Content)
+			}
+		}
+	}
+	if !found {
+		t.Error("Files should be preserved in update mode (default removals only apply to new additions)")
 	}
 }
 
@@ -334,7 +422,7 @@ func TestFindSourceVersion_EpicFallback(t *testing.T) {
 	}
 }
 
-func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
+func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
@@ -342,27 +430,27 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 	appID := "TestPkg_abc!TestApp"
 
 	// Override a forced field (Distributor) and a non-forced field.
-	// Forced fields always win: Distributor must keep its default value.
+	// User overrides take priority over forced field defaults.
 	overrides := map[string]string{
 		"Distributor":   "CustomDist",
 		"DriverProfile": "custom.exe",
 	}
 
-	clone := CloneVersion(src, appID, overrides, nil)
+	got := AddUWPVersion(src, appID, overrides, nil)
 
 	// Build a map of element names (lowercased) to count and content
 	seen := make(map[string][]string)
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		lower := strings.ToLower(e.ElementName())
 		seen[lower] = append(seen[lower], e.Content)
 	}
 
-	// Distributor must appear exactly once with the forced default, ignoring the override
+	// Distributor must appear exactly once with the override value
 	if count := len(seen["distributor"]); count != 1 {
 		t.Errorf("Distributor appeared %d times, want 1", count)
 	}
-	if seen["distributor"][0] != "UWP" {
-		t.Errorf("Distributor = %q, want UWP (forced field ignores override)", seen["distributor"][0])
+	if seen["distributor"][0] != "CustomDist" {
+		t.Errorf("Distributor = %q, want CustomDist (override wins over forced default)", seen["distributor"][0])
 	}
 
 	// UWPPackageFamilyName must appear exactly once
@@ -381,7 +469,7 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 		t.Errorf("AppUserModelId = %q, want %s", seen["appusermodelid"][0], appID)
 	}
 
-	// Non-forced override should still work
+	// Non-forced override should also work
 	if count := len(seen["driverprofile"]); count != 1 {
 		t.Errorf("DriverProfile appeared %d times, want 1", count)
 	}
@@ -390,16 +478,16 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 	}
 }
 
-func TestCloneVersion_ForcedFieldNoOverride(t *testing.T) {
+func TestAddUWPVersion_ForcedFieldNoOverride(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
 	appID := "TestPkg_abc!TestApp"
-	clone := CloneVersion(src, appID, nil, nil)
+	got := AddUWPVersion(src, appID, nil, nil)
 
 	seen := make(map[string][]string)
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		lower := strings.ToLower(e.ElementName())
 		seen[lower] = append(seen[lower], e.Content)
 	}
@@ -421,17 +509,17 @@ func TestCloneVersion_ForcedFieldNoOverride(t *testing.T) {
 	}
 }
 
-func TestCloneVersion_ForcedFieldOrder(t *testing.T) {
+func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
 	appID := "TestPkg_abc!TestApp"
-	clone := CloneVersion(src, appID, nil, nil)
+	got := AddUWPVersion(src, appID, nil, nil)
 
-	// Collect the order of forced fields as they appear in the clone
+	// Collect the order of forced fields as they appear in the got
 	var order []string
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		lower := strings.ToLower(e.ElementName())
 		if lower == "distributor" || lower == "uwppackagefamilyname" || lower == "appusermodelid" {
 			order = append(order, lower)
@@ -450,7 +538,7 @@ func TestCloneVersion_ForcedFieldOrder(t *testing.T) {
 	}
 }
 
-func TestCloneVersion_NonForcedOverrideOrder(t *testing.T) {
+func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
@@ -463,11 +551,11 @@ func TestCloneVersion_NonForcedOverrideOrder(t *testing.T) {
 		"DriverProfile": "custom.exe", // override of existing field
 	}
 
-	clone := CloneVersion(src, "TestPkg_abc!App", overrides, nil)
+	got := AddUWPVersion(src, "TestPkg_abc!App", overrides, nil)
 
 	// Collect the non-forced override elements by their appearance order
 	var overrideNames []string
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		name := e.ElementName()
 		if name == "AlphaField" || name == "MiddleField" || name == "ZebraField" {
 			overrideNames = append(overrideNames, name)
@@ -486,7 +574,7 @@ func TestCloneVersion_NonForcedOverrideOrder(t *testing.T) {
 	}
 }
 
-func TestCloneVersion_OverrideOverridesDefaultRemove(t *testing.T) {
+func TestAddUWPVersion_OverrideOverridesDefaultRemove(t *testing.T) {
 	// When an override key matches a field in defaultRemoveFields (e.g., EpicAppId),
 	// the override should win: the source's EpicAppId element is skipped in
 	// copyPreservedElements (because it's in the remove set), but the override
@@ -499,11 +587,11 @@ func TestCloneVersion_OverrideOverridesDefaultRemove(t *testing.T) {
 		"EpicAppId": "my-custom-epic-id",
 	}
 
-	clone := CloneVersion(src, "TestPkg!App", overrides, nil)
+	got := AddUWPVersion(src, "TestPkg!App", overrides, nil)
 
-	// The clone should have the override value for EpicAppId
+	// The got should have the override value for EpicAppId
 	found := false
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		if e.ElementName() == "EpicAppId" {
 			found = true
 			if e.Content != "my-custom-epic-id" {
@@ -512,11 +600,11 @@ func TestCloneVersion_OverrideOverridesDefaultRemove(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected override EpicAppId to be present in clone")
+		t.Error("expected override EpicAppId to be present in got")
 	}
 
 	// SteamAppIds (also in defaultRemoveFields, but not in overrides) should be absent
-	for _, e := range clone.Elements {
+	for _, e := range got.Elements {
 		if strings.EqualFold(e.ElementName(), "SteamAppIds") {
 			t.Error("SteamAppIds should be removed (it's in defaultRemoveFields with no override)")
 		}

@@ -56,7 +56,7 @@ func (e *XmlElement) ElementName() string {
 	return e.XMLName.Local
 }
 
-// ---- Fields removed by default during UWP clone ----
+// ---- Fields removed by default during UWP addition ----
 
 var defaultRemoveFields = []string{
 	"Files",
@@ -168,7 +168,7 @@ func HasUWPVersion(fp *Fingerprint) bool {
 	return false
 }
 
-// FindSourceVersion finds the best source version to clone from.
+// FindSourceVersion finds the best source version to build a UWP version from.
 // Priority: steam > first non-uwp version.
 func FindSourceVersion(fp *Fingerprint) *Version {
 	var firstNonUWP *Version
@@ -184,28 +184,52 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 	return firstNonUWP
 }
 
-// CloneVersion creates a copy of a Version for UWP patching.
+// AddUWPVersion builds a new UWP version from a source version.
 // It removes default fields, applies overrides, adds UWP-specific fields,
 // forces Distributor to UWP, and sets the version name.
-func CloneVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
-	removeSet := buildRemoveSet(remove)
-	forcedFields := buildForcedFields(appID)
-	overrideSet := buildOverrideSet(overrides, forcedFields)
-
-	clone := Version{
-		Name:     "uwp",
-		Elements: make([]XmlElement, 0, len(src.Elements)),
-	}
-	copyPreservedElements(&clone, src, removeSet, overrideSet)
-	applyOverrides(&clone, overrideSet)
-	return clone
+func AddUWPVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
+	return buildUWPVersion(src, appID, overrides, remove, true)
 }
 
-// buildRemoveSet creates a set of element names to remove during cloning.
-func buildRemoveSet(extra []string) map[string]bool {
+// UpdateUWPVersion rebuilds an existing UWP version with overrides and removals.
+// Unlike AddUWPVersion, it preserves the version name and existing forced
+// fields, and only removes the explicitly listed elements.
+func UpdateUWPVersion(src *Version, overrides map[string]string, remove []string) Version {
+	return buildUWPVersion(src, "", overrides, remove, false)
+}
+
+// buildUWPVersion builds a Version from a source, either as a new UWP addition
+// (add=true: default removals and forced fields from appID) or as an update
+// of an existing version (add=false: only explicit removals, no forced fields).
+func buildUWPVersion(src *Version, appID string, overrides map[string]string, remove []string, add bool) Version {
+	removeSet := buildRemoveSet(remove, add)
+	var forcedFields map[string]string
+	if add {
+		forcedFields = buildForcedFields(appID)
+	}
+	overrideSet := buildOverrideSet(overrides, forcedFields)
+
+	name := "uwp"
+	if !add {
+		name = src.Name
+	}
+	built := Version{
+		Name:     name,
+		Elements: make([]XmlElement, 0, len(src.Elements)),
+	}
+	copyPreservedElements(&built, src, removeSet, overrideSet)
+	applyOverrides(&built, overrideSet)
+	return built
+}
+
+// buildRemoveSet creates a set of element names to remove when building a version.
+// Default removals only apply when adding a new version.
+func buildRemoveSet(extra []string, includeDefaults bool) map[string]bool {
 	removeSet := make(map[string]bool)
-	for _, f := range defaultRemoveFields {
-		removeSet[strings.ToLower(f)] = true
+	if includeDefaults {
+		for _, f := range defaultRemoveFields {
+			removeSet[strings.ToLower(f)] = true
+		}
 	}
 	for _, f := range extra {
 		removeSet[strings.ToLower(f)] = true
@@ -214,7 +238,7 @@ func buildRemoveSet(extra []string) map[string]bool {
 }
 
 // buildForcedFields returns the map of forced field names to their default values.
-// Forced fields always win over user overrides (see buildOverrideSet).
+// User overrides take priority over these defaults (see buildOverrideSet).
 func buildForcedFields(appID string) map[string]string {
 	pkgFamily := db.PackageFamilyName(appID)
 	return map[string]string{
@@ -225,15 +249,15 @@ func buildForcedFields(appID string) map[string]string {
 }
 
 // buildOverrideSet builds the unified override lookup: every override key
-// (lowercased) mapped to its original casing and value, with forced fields
-// taking priority over user overrides.
+// (lowercased) mapped to its original casing and value. Forced fields provide
+// defaults that user overrides take priority over.
 func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string][2]string {
 	overrideSet := make(map[string][2]string, len(overrides)+len(forcedFields))
-	for k, v := range overrides {
+	for k, v := range forcedFields {
 		nameLower := strings.ToLower(k)
 		overrideSet[nameLower] = [2]string{k, v}
 	}
-	for k, v := range forcedFields {
+	for k, v := range overrides {
 		nameLower := strings.ToLower(k)
 		overrideSet[nameLower] = [2]string{k, v}
 	}
@@ -241,26 +265,26 @@ func buildOverrideSet(overrides map[string]string, forcedFields map[string]strin
 }
 
 // copyPreservedElements copies source elements that survive filtering.
-func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, overrideSet map[string][2]string) {
+func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool, overrideSet map[string][2]string) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
 		_, overrides := overrideSet[nameLower]
 		if removeSet[nameLower] || overrides {
 			continue
 		}
-		clone.Elements = append(clone.Elements, elem)
+		dst.Elements = append(dst.Elements, elem)
 	}
 }
 
 // applyOverrides appends override elements, sorted by key for deterministic output.
-func applyOverrides(clone *Version, overrideSet map[string][2]string) {
+func applyOverrides(dst *Version, overrideSet map[string][2]string) {
 	keys := make([]string, 0, len(overrideSet))
 	for k := range overrideSet {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		clone.Elements = append(clone.Elements, XmlElement{
+		dst.Elements = append(dst.Elements, XmlElement{
 			XMLName: xml.Name{Local: overrideSet[k][0]},
 			Content: overrideSet[k][1],
 		})

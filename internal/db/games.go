@@ -3,7 +3,9 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,8 +101,11 @@ func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*Game
 		}
 	}
 	if cacheDir != "" {
-		if gameDB, err := LoadFromPath(filepath.Join(cacheDir, "games.json")); err == nil {
+		cachePath := filepath.Join(cacheDir, "games.json")
+		if gameDB, err := LoadFromPath(cachePath); err == nil {
 			return gameDB, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Warning: cached games.json unusable, ignoring: %v\n", err)
 		}
 	}
 	return LoadFromBytes(bundledData)

@@ -7,9 +7,7 @@ import (
 	"time"
 )
 
-var (
-	GamesURL = "https://github.com/fernandoenzo/nvidia-uwp-patch/raw/main/games.json"
-)
+var GamesURL = "https://github.com/fernandoenzo/nvidia-uwp-patch/raw/main/games.json"
 
 // FetchGamesJSON downloads the latest games.json from GitHub.
 // Returns the raw JSON bytes or an error if the download fails.

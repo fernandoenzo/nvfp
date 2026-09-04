@@ -153,12 +153,8 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// Write the patch
-	modified, err := writePatch(profileDB, dbPath)
-	if err != nil {
+	if err := writePatch(profileDB, dbPath); err != nil {
 		t.Fatalf("writePatch() error: %v", err)
-	}
-	if !modified {
-		t.Error("writePatch() returned false, want true")
 	}
 
 	// Backup should exist
@@ -177,29 +173,6 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 	if !hasUWPVersion(fp) {
 		t.Error("fingerprint should have UWP version after patching")
-	}
-}
-
-func TestWritePatch_NoMetadata(t *testing.T) {
-	profileDB := newTestProfileDB(t)
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "fingerprint.db")
-
-	// Write initial DB
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
-	}
-
-	// Apply patch
-	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
-
-	// writePatch should succeed even without metadata.json
-	modified, err := writePatch(profileDB, dbPath)
-	if err != nil {
-		t.Fatalf("writePatch() error: %v", err)
-	}
-	if !modified {
-		t.Error("writePatch() returned false, want true")
 	}
 }
 

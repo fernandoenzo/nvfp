@@ -111,7 +111,7 @@ func findFingerprintDB() (string, error) {
 	path := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App",
 		"NvBackend", "ApplicationOntology", "data", "fingerprint.db")
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("fingerprint.db not found (is NVIDIA App installed?)")
+		return "", fmt.Errorf("fingerprint.db not found (is NVIDIA App installed?): %w", err)
 	}
 	return path, nil
 }
@@ -130,14 +130,17 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 	}
 	modified := applyPatches(profileDB, games)
 
-	if !modified || dryRun {
-		if dryRun && modified {
+	if dryRun {
+		if modified {
 			fmt.Println("  (dry-run: no changes written)")
 		}
 		return modified, nil
 	}
+	if !modified {
+		return false, nil
+	}
 
-	return writePatch(profileDB, dbPath)
+	return true, writePatch(profileDB, dbPath)
 }
 
 // filterGames returns the games list, optionally filtered by --game flag.
@@ -163,7 +166,7 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 		case nvidia.StatusPatched:
 			modified = true
 			fmt.Printf("  ✓ %s\n", result.Message)
-		case nvidia.StatusAlreadyUWP:
+		case nvidia.StatusAlreadyPresent:
 			fmt.Printf("  ⊘ %s\n", result.Message)
 		case nvidia.StatusNotFound, nvidia.StatusNoSource, nvidia.StatusVersionNotFound:
 			fmt.Printf("  ✗ %s\n", result.Message)
@@ -173,14 +176,14 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 }
 
 // writePatch backs up and writes the patched database.
-func writePatch(profileDB *nvidia.ProfileDB, dbPath string) (bool, error) {
+func writePatch(profileDB *nvidia.ProfileDB, dbPath string) error {
 	if err := nvidia.BackupFile(dbPath); err != nil {
-		return false, fmt.Errorf("backing up %s: %w", dbPath, err)
+		return fmt.Errorf("backing up %s: %w", dbPath, err)
 	}
 	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		return false, fmt.Errorf("writing %s: %w", dbPath, err)
+		return fmt.Errorf("writing %s: %w", dbPath, err)
 	}
-	return true, nil
+	return nil
 }
 
 func listGames(gameDB *db.GameDB) {
@@ -198,7 +201,7 @@ func listGames(gameDB *db.GameDB) {
 			}
 		}
 		if len(game.Remove) > 0 {
-			fmt.Printf("    Remove: %v\n", game.Remove)
+			fmt.Printf("    Remove: %v\n", slices.Sorted(slices.Values(game.Remove)))
 		}
 	}
 }

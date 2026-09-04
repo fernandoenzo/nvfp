@@ -176,9 +176,9 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 	}
 	overrideSet := buildOverrideSet(overrides, forcedFields)
 
-	name := "uwp"
-	if !addUWP {
-		name = src.Name
+	name := src.Name
+	if addUWP {
+		name = "uwp"
 	}
 	built := Version{
 		Name:     name,
@@ -216,21 +216,24 @@ func buildUWPForcedFields(appID string) map[string]string {
 }
 
 // buildOverrideSet builds the unified override lookup: every override key
-// (lowercased) mapped to its original casing and value. Forced fields provide
+// (lowercased) mapped to the element to append. Forced fields provide
 // defaults that user overrides take priority over.
-func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string][2]string {
-	overrideSet := make(map[string][2]string, len(overrides)+len(forcedFields))
+func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string]XmlElement {
+	overrideSet := make(map[string]XmlElement, len(overrides)+len(forcedFields))
 	// forcedFields first so user overrides take priority.
 	for _, fields := range []map[string]string{forcedFields, overrides} {
 		for k, v := range fields {
-			overrideSet[strings.ToLower(k)] = [2]string{k, v}
+			overrideSet[strings.ToLower(k)] = XmlElement{
+				XMLName: xml.Name{Local: k},
+				Content: v,
+			}
 		}
 	}
 	return overrideSet
 }
 
 // copyPreservedElements copies source elements that survive filtering.
-func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool, overrideSet map[string][2]string) {
+func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool, overrideSet map[string]XmlElement) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
 		_, overrides := overrideSet[nameLower]
@@ -242,11 +245,8 @@ func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool
 }
 
 // applyOverrides appends override elements, sorted by key for deterministic output.
-func applyOverrides(dst *Version, overrideSet map[string][2]string) {
+func applyOverrides(dst *Version, overrideSet map[string]XmlElement) {
 	for _, k := range slices.Sorted(maps.Keys(overrideSet)) {
-		dst.Elements = append(dst.Elements, XmlElement{
-			XMLName: xml.Name{Local: overrideSet[k][0]},
-			Content: overrideSet[k][1],
-		})
+		dst.Elements = append(dst.Elements, overrideSet[k])
 	}
 }

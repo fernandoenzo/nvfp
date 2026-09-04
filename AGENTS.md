@@ -72,7 +72,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 - **Table-driven tests**: Use `[]struct{ name string; ... }` with `t.Run(tc.name, ...)`.
 - **Temp files**: Always use `t.TempDir()` for isolation; never hardcode paths.
 - **XML model**: Generic `XmlElement` struct (XMLName, Attr, Content, Children) for forward compatibility — no domain-specific structs for XML nodes.
-- **PatchGame signature**: Takes `*ProfileDB` + `db.Game` (value, not pointer). All game fields (fingerprint, appUserModelID, versions, remove, overrides) come from the struct.
+- **PatchGame signature**: Takes `*ProfileDB` + `*db.Game`. All game fields (fingerprint, appUserModelID, versions, remove, overrides) come from the struct.
 - **Patch result**: `PatchResult` with `Status` + `Message` fields: `patched`, `already_uwp`, `not_found`, `no_source`, `version_not_found`.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appUserModelID; user overrides take priority over these defaults.

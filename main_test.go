@@ -150,7 +150,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 
 	// Apply a patch
-	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
+	nvidia.PatchGame(profileDB, &db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// Write the patch
 	if err := writePatch(profileDB, dbPath); err != nil {

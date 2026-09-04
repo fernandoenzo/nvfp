@@ -74,7 +74,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 - **Patch result**: `PatchResult` with `Status` field: `patched`, `already_uwp`, `not_found`, `no_source`.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appID; user overrides take priority over these defaults.
-- **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appID) vs `UpdateUWPVersion` (existing version: only explicit removals, forced fields preserved).
+- **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appID) vs `UpdateVersion` (existing version: only explicit removals, forced fields preserved).
 - **Deterministic output**: override elements are emitted sorted by lowercased key.
 - **Source version priority**: Steam > first non-UWP version found.
 - **Embedded resources**: `games.json` embedded via `//go:embed` and used as fallback.
@@ -87,7 +87,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
 | `internal/db/games.go` | `GameDB`, `Game` types, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `AddUWPVersion`, `UpdateUWPVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
+| `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `AddUWPVersion`, `UpdateVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
 | `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus` and status constants |
 | `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |

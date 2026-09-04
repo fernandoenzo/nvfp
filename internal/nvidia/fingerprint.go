@@ -178,29 +178,29 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 // It removes default fields, applies overrides, adds UWP-specific fields,
 // forces Distributor to UWP, and sets the version name.
 func AddUWPVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
-	return buildUWPVersion(src, appID, overrides, remove, true)
+	return buildVersion(src, appID, overrides, remove, true)
 }
 
-// UpdateUWPVersion rebuilds an existing UWP version with overrides and removals.
+// UpdateVersion rebuilds an existing version with overrides and removals.
 // Unlike AddUWPVersion, it preserves the version name and existing forced
 // fields, and only removes the explicitly listed elements.
-func UpdateUWPVersion(src *Version, overrides map[string]string, remove []string) Version {
-	return buildUWPVersion(src, "", overrides, remove, false)
+func UpdateVersion(src *Version, overrides map[string]string, remove []string) Version {
+	return buildVersion(src, "", overrides, remove, false)
 }
 
-// buildUWPVersion builds a Version from a source, either as a new UWP addition
-// (add=true: default removals and forced fields from appID) or as an update
-// of an existing version (add=false: only explicit removals, no forced fields).
-func buildUWPVersion(src *Version, appID string, overrides map[string]string, remove []string, add bool) Version {
-	removeSet := buildRemoveSet(remove, add)
+// buildVersion builds a Version from a source, either as a new UWP addition
+// (addUWP=true: default removals and forced fields from appID) or as an update
+// of an existing version (addUWP=false: only explicit removals, no forced fields).
+func buildVersion(src *Version, appID string, overrides map[string]string, remove []string, addUWP bool) Version {
+	removeSet := buildRemoveSet(remove, addUWP)
 	var forcedFields map[string]string
-	if add {
-		forcedFields = buildForcedFields(appID)
+	if addUWP {
+		forcedFields = buildUWPForcedFields(appID)
 	}
 	overrideSet := buildOverrideSet(overrides, forcedFields)
 
 	name := "uwp"
-	if !add {
+	if !addUWP {
 		name = src.Name
 	}
 	built := Version{
@@ -227,9 +227,9 @@ func buildRemoveSet(extra []string, includeDefaults bool) map[string]bool {
 	return removeSet
 }
 
-// buildForcedFields returns the map of forced field names to their default values.
+// buildUWPForcedFields returns the map of forced field names to their default values.
 // User overrides take priority over these defaults (see buildOverrideSet).
-func buildForcedFields(appID string) map[string]string {
+func buildUWPForcedFields(appID string) map[string]string {
 	pkgFamily := db.PackageFamilyName(appID)
 	return map[string]string{
 		"Distributor":          "UWP",

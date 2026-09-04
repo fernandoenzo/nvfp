@@ -119,7 +119,7 @@ func findFingerprintDB() (string, error) {
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 	fmt.Printf("Processing: %s\n", dbPath)
 
-	profileDB, err := nvidia.ParseProfileDB(dbPath)
+	fdb, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		return false, fmt.Errorf("parsing %s: %w", dbPath, err)
 	}
@@ -128,7 +128,7 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	modified := applyPatches(profileDB, games)
+	modified := applyPatches(fdb, games)
 
 	if dryRun {
 		if modified {
@@ -140,7 +140,7 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 		return false, nil
 	}
 
-	return true, writePatch(profileDB, dbPath)
+	return true, writePatch(fdb, dbPath)
 }
 
 // filterGames returns the games list, optionally filtered by --game flag.
@@ -158,10 +158,10 @@ func filterGames(gameDB *db.GameDB) ([]db.Game, error) {
 }
 
 // applyPatches patches all games and returns whether any were modified.
-func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
+func applyPatches(fdb *nvidia.FingerprintDB, games []db.Game) bool {
 	modified := false
 	for i := range games {
-		result := nvidia.PatchGame(profileDB, &games[i])
+		result := nvidia.PatchGame(fdb, &games[i])
 		switch result.Status {
 		case nvidia.StatusPatched:
 			modified = true
@@ -176,11 +176,11 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 }
 
 // writePatch backs up and writes the patched database.
-func writePatch(profileDB *nvidia.ProfileDB, dbPath string) error {
+func writePatch(fdb *nvidia.FingerprintDB, dbPath string) error {
 	if err := nvidia.BackupFile(dbPath); err != nil {
 		return fmt.Errorf("backing up %s: %w", dbPath, err)
 	}
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
 		return fmt.Errorf("writing %s: %w", dbPath, err)
 	}
 	return nil

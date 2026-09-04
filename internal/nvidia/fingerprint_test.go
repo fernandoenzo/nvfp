@@ -10,10 +10,10 @@ import (
 	gamesdb "github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
 )
 
-func TestParseProfileDB(t *testing.T) {
-	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+func TestParseFingerprintDB(t *testing.T) {
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	if err != nil {
-		t.Fatalf("ParseProfileDB failed: %v", err)
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}
 
 	if len(db.Fingerprints) != 5 {
@@ -40,7 +40,7 @@ func TestParseProfileDB(t *testing.T) {
 }
 
 func TestFindFingerprint(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	tests := []struct {
 		name     string
@@ -68,7 +68,7 @@ func TestFindFingerprint(t *testing.T) {
 }
 
 func TestFindVersion(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	tests := []struct {
 		name       string
@@ -94,7 +94,7 @@ func TestFindVersion(t *testing.T) {
 }
 
 func TestAddUWPVersion(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -159,7 +159,7 @@ func TestAddUWPVersion(t *testing.T) {
 }
 
 func TestAddUWPWithOverrides(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -184,7 +184,7 @@ func TestAddUWPWithOverrides(t *testing.T) {
 }
 
 func TestAddUWPWithRemove(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -198,7 +198,7 @@ func TestAddUWPWithRemove(t *testing.T) {
 }
 
 func TestPatchGame(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	tests := []struct {
 		fingerprint string
@@ -222,7 +222,7 @@ func TestPatchGame(t *testing.T) {
 }
 
 func TestPatchGame_UpdateExistingUWP(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	overrides := map[string]string{
 		"DriverProfile": "game_uwp.exe",
@@ -270,7 +270,7 @@ func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 }
 
 func TestPatchGame_UpdateExistingUWP_NoChanges(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}})
 	if result.Status != StatusAlreadyPresent {
@@ -279,7 +279,7 @@ func TestPatchGame_UpdateExistingUWP_NoChanges(t *testing.T) {
 }
 
 func TestPatchGame_UpdateExistingUWP_Idempotent(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	game := gamesdb.Game{
 		Fingerprint:    "already_uwp_game",
@@ -301,7 +301,7 @@ func TestPatchGame_UpdateExistingUWP_Idempotent(t *testing.T) {
 }
 
 func TestPatchGame_UpdateExistingUWP_KeepsDefaultRemoveFields(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "already_uwp_game")
 	uwp := findVersion(fp, "uwp")
 	// Inject a field that AddUWPVersion would remove by default
@@ -332,7 +332,7 @@ func TestPatchGame_UpdateExistingUWP_KeepsDefaultRemoveFields(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	// final_fantasy_vii_remake has steam + epic, no uwp
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
@@ -374,7 +374,7 @@ func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_MultiUpdate(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	// already_uwp_game has steam + uwp
 	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
@@ -402,7 +402,7 @@ func TestPatchGame_EnsureVersions_MultiUpdate(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_Missing(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"gog", "origin"}})
 	if result.Status != StatusVersionNotFound {
@@ -411,7 +411,7 @@ func TestPatchGame_EnsureVersions_Missing(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_Mixed(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	// uwp added, gog missing
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
@@ -428,7 +428,7 @@ func TestPatchGame_EnsureVersions_Mixed(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_CaseInsensitive(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"Steam"}, Overrides: overrides})
@@ -451,7 +451,7 @@ func TestPatchGame_EnsureVersions_CaseInsensitive(t *testing.T) {
 }
 
 func TestPatchGame_EnsureVersions_NoChanges(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"steam", "uwp"}})
 	if result.Status != StatusAlreadyPresent {
@@ -461,7 +461,7 @@ func TestPatchGame_EnsureVersions_NoChanges(t *testing.T) {
 
 func TestWriteAndReadRoundTrip(t *testing.T) {
 	// Parse, modify, write, re-parse
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
@@ -469,12 +469,12 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
 
-	if err := WriteProfileDB(db, tmpPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := WriteFingerprintDB(db, tmpPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	// Re-parse
-	db2, err := ParseProfileDB(tmpPath)
+	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestXmlUnmarshalMarshal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var db ProfileDB
+	var db FingerprintDB
 	if err := xml.Unmarshal(data, &db); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestXmlUnmarshalMarshal(t *testing.T) {
 }
 
 func TestFindSourceVersion_EpicFallback(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "epic_only_game")
 	if fp == nil {
 		t.Fatal("epic_only_game fingerprint not found")
@@ -579,7 +579,7 @@ func TestFindSourceVersion_EpicFallback(t *testing.T) {
 }
 
 func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -635,7 +635,7 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 }
 
 func TestAddUWPVersion_ForcedFieldNoOverride(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -666,7 +666,7 @@ func TestAddUWPVersion_ForcedFieldNoOverride(t *testing.T) {
 }
 
 func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -695,7 +695,7 @@ func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
 }
 
 func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -735,7 +735,7 @@ func TestAddUWPVersion_OverrideOverridesDefaultRemove(t *testing.T) {
 	// the override should win: the source's EpicAppId element is skipped in
 	// copyPreservedElements (because it's in the remove set), but the override
 	// value is then added by applyOverrides.
-	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)
 
@@ -775,7 +775,7 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Fatalf("reading testdata: %v", err)
 	}
 
-	var db ProfileDB
+	var db FingerprintDB
 	if err := xml.Unmarshal(data, &db); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 	}
 	content := xml.Header + string(output) + "\n"
 
-	var db2 ProfileDB
+	var db2 FingerprintDB
 	if err := xml.Unmarshal([]byte(content), &db2); err != nil {
 		t.Fatalf("re-unmarshal failed: %v", err)
 	}
@@ -851,9 +851,9 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 	// When patching a fingerprint, its Fingerprint-level elements
 	// (DisplayName, ChromaAppID, etc.) must be preserved in the output.
-	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint_metadata.db"))
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint_metadata.db"))
 	if err != nil {
-		t.Fatalf("ParseProfileDB failed: %v", err)
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}
 
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "with_metadata", AppUserModelID: "TestPkg!App", Versions: []string{"uwp"}})
@@ -864,11 +864,11 @@ func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 	// Write to temp and re-read
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
-	if err := WriteProfileDB(db, tmpPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := WriteFingerprintDB(db, tmpPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	db2, err := ParseProfileDB(tmpPath)
+	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}
@@ -890,12 +890,12 @@ func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 	}
 }
 
-func TestParseProfileDB_FingerprintDBRoot(t *testing.T) {
+func TestParseFingerprintDB_FingerprintDBRoot(t *testing.T) {
 	// Verify that the root element <FingerprintDB> is correctly parsed.
 	// This is the real-world root element name (BUG-0 fix).
-	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	if err != nil {
-		t.Fatalf("ParseProfileDB failed: %v", err)
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}
 	if len(db.Fingerprints) == 0 {
 		t.Error("expected at least one fingerprint")

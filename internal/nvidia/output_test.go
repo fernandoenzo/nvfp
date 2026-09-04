@@ -10,9 +10,9 @@ import (
 )
 
 func TestPatchOutputContent(t *testing.T) {
-	db, err := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	if err != nil {
-		t.Fatalf("ParseProfileDB failed: %v", err)
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}
 
 	result := PatchGame(db, &gamesdb.Game{
@@ -30,8 +30,8 @@ func TestPatchOutputContent(t *testing.T) {
 	// Write to temp file and read back content
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
-	if err := WriteProfileDB(db, tmpPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := WriteFingerprintDB(db, tmpPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	contentBytes, err := os.ReadFile(tmpPath)
@@ -113,7 +113,7 @@ func TestPatchOutputContent(t *testing.T) {
 	}
 
 	// Verify we can round-trip
-	db2, err := ParseProfileDB(tmpPath)
+	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}

@@ -39,8 +39,8 @@ const (
 // PatchGame ensures the requested versions of a game exist and carry the
 // given overrides/removals. UWP versions are added when missing; other
 // versions are only updated. Returns a PatchResult indicating what happened.
-func PatchGame(pdb *ProfileDB, game *db.Game) PatchResult {
-	fp := FindFingerprint(pdb, game.Fingerprint)
+func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
+	fp := FindFingerprint(fdb, game.Fingerprint)
 	if fp == nil {
 		return patchResult(StatusNotFound, "fingerprint %q not found in database", game.Fingerprint)
 	}

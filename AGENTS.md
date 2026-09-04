@@ -17,10 +17,10 @@ findFingerprintDB ──► dbPath
                             patchDB
                                  │
                                  ▼
-          ParseProfileDB ──► applyPatches ──► writePatch
+          ParseFingerprintDB ──► applyPatches ──► writePatch
                     │                              │
                     ▼                              ▼
-            PatchGame per game          BackupFile → WriteProfileDB
+            PatchGame per game          BackupFile → WriteFingerprintDB
                     │
                     ▼
           FindFingerprint → ensureVersion
@@ -72,7 +72,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 - **Table-driven tests**: Use `[]struct{ name string; ... }` with `t.Run(tc.name, ...)`.
 - **Temp files**: Always use `t.TempDir()` for isolation; never hardcode paths.
 - **XML model**: Generic `XmlElement` struct (XMLName, Attr, Content, Children) for forward compatibility — no domain-specific structs for XML nodes.
-- **PatchGame signature**: Takes `*ProfileDB` + `*db.Game`. All game fields (fingerprint, appUserModelID, versions, remove, overrides) come from the struct.
+- **PatchGame signature**: Takes `*FingerprintDB` + `*db.Game`. All game fields (fingerprint, appUserModelID, versions, remove, overrides) come from the struct.
 - **Patch result**: `PatchResult` with `Status` + `Message` fields: `patched`, `already_uwp`, `not_found`, `no_source`, `version_not_found`.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appUserModelID; user overrides take priority over these defaults.
@@ -89,7 +89,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
 | `internal/db/games.go` | `GameDB`, `Game` types, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `AddUWPVersion`, `UpdateVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
+| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `XmlElement`, `AddUWPVersion`, `UpdateVersion`, `ParseFingerprintDB`, `WriteFingerprintDB`, `BackupFile` |
 | `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `ensureVersion`, `summarize`, `findVersion` |
 | `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |

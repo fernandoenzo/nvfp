@@ -33,6 +33,7 @@ const (
 	outcomeUpdated
 	outcomeAlready
 	outcomeMissing
+	outcomeNoSource
 )
 
 // PatchGame ensures the requested versions of a game exist and carry the
@@ -46,11 +47,7 @@ func PatchGame(pdb *ProfileDB, game *db.Game) PatchResult {
 
 	var added, updated, already, missing []string
 	for _, name := range game.Versions {
-		outcome, err := ensureVersion(fp, game, name)
-		if err != nil {
-			return patchResult(StatusNoSource, "%s", err)
-		}
-		switch outcome {
+		switch ensureVersion(fp, game, name) {
 		case outcomeAdded:
 			added = append(added, name)
 		case outcomeUpdated:
@@ -59,6 +56,8 @@ func PatchGame(pdb *ProfileDB, game *db.Game) PatchResult {
 			already = append(already, name)
 		case outcomeMissing:
 			missing = append(missing, name)
+		case outcomeNoSource:
+			return patchResult(StatusNoSource, "no source version found for fingerprint %q", game.Fingerprint)
 		}
 	}
 	return summarize(game.Fingerprint, added, updated, already, missing)
@@ -67,27 +66,27 @@ func PatchGame(pdb *ProfileDB, game *db.Game) PatchResult {
 // ensureVersion makes one requested version exist and carry the game's
 // overrides/removals, and classifies the outcome. Only UWP versions are
 // created when missing; any other missing version is just reported.
-func ensureVersion(fp *Fingerprint, game *db.Game, name string) (versionOutcome, error) {
+func ensureVersion(fp *Fingerprint, game *db.Game, name string) versionOutcome {
 	if v := findVersion(fp, name); v != nil {
 		if len(game.Overrides) == 0 && len(game.Remove) == 0 {
-			return outcomeAlready, nil
+			return outcomeAlready
 		}
 		updated := UpdateVersion(v, game.Overrides, game.Remove)
 		if reflect.DeepEqual(updated, *v) {
-			return outcomeAlready, nil
+			return outcomeAlready
 		}
 		*v = updated
-		return outcomeUpdated, nil
+		return outcomeUpdated
 	}
 	if !strings.EqualFold(name, "uwp") {
-		return outcomeMissing, nil
+		return outcomeMissing
 	}
 	src := FindSourceVersion(fp)
 	if src == nil {
-		return outcomeMissing, fmt.Errorf("no source version found for fingerprint %q", game.Fingerprint)
+		return outcomeNoSource
 	}
 	fp.Versions = append(fp.Versions, AddUWPVersion(src, game.AppUserModelID, game.Overrides, game.Remove))
-	return outcomeAdded, nil
+	return outcomeAdded
 }
 
 // summarize composes the final PatchResult from the per-version outcomes.

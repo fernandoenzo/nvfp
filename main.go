@@ -3,8 +3,10 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
 	"github.com/fernandoenzo/nvidia-uwp-patch/internal/nvidia"
@@ -26,6 +28,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "nvidia-uwp-patch",
 		Short: "Patch NVIDIA App fingerprint.db to add UWP game profiles",
+		Args:  cobra.NoArgs,
 		RunE:  run,
 	}
 
@@ -62,20 +65,20 @@ func resolveGames() (*db.GameDB, error) {
 	if gamesJSONPath != "" {
 		// Explicit user request takes priority over remote and cache.
 		// Fail loudly instead of silently falling back to the remote list.
-		db, err := db.LoadFromPath(gamesJSONPath)
+		gameDB, err := db.LoadFromPath(gamesJSONPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading custom games.json: %w", err)
 		}
-		return db, nil
+		return gameDB, nil
 	}
 
+	// The remote fetch must not depend on the cache dir being available.
 	cacheDir, err := getCacheDir()
 	if err != nil {
-		// Fall back to bundled only
-		return db.LoadFromBytes(bundledGames)
+		fmt.Fprintf(os.Stderr, "Warning: cache unavailable, continuing without it: %v\n", err)
+		cacheDir = ""
 	}
 
-	// Try remote
 	data, err := update.FetchGamesJSON()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
@@ -121,7 +124,10 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 		return false, fmt.Errorf("parsing %s: %w", dbPath, err)
 	}
 
-	games := filterGames(gameDB)
+	games, err := filterGames(gameDB)
+	if err != nil {
+		return false, err
+	}
 	modified := applyPatches(profileDB, games)
 
 	if !modified || dryRun {
@@ -135,24 +141,24 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 }
 
 // filterGames returns the games list, optionally filtered by --game flag.
-func filterGames(gameDB *db.GameDB) []db.Game {
+// A non-empty filter that matches nothing is an error, not a silent success.
+func filterGames(gameDB *db.GameDB) ([]db.Game, error) {
 	if gameFilter == "" {
-		return gameDB.Games
+		return gameDB.Games, nil
 	}
 	for _, g := range gameDB.Games {
 		if g.Fingerprint == gameFilter {
-			return []db.Game{g}
+			return []db.Game{g}, nil
 		}
 	}
-	fmt.Printf("  Game %q not found in games database\n", gameFilter)
-	return nil
+	return nil, fmt.Errorf("game %q not found in games database", gameFilter)
 }
 
 // applyPatches patches all games and returns whether any were modified.
 func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	modified := false
 	for _, game := range games {
-		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Versions, game.Remove, game.Overrides)
+		result := nvidia.PatchGame(profileDB, game)
 		switch result.Status {
 		case nvidia.StatusPatched:
 			modified = true
@@ -161,8 +167,6 @@ func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 			fmt.Printf("  ⊘ %s\n", result.Message)
 		case nvidia.StatusNotFound, nvidia.StatusNoSource, nvidia.StatusVersionNotFound:
 			fmt.Printf("  ✗ %s\n", result.Message)
-		default:
-			fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)
 		}
 	}
 	return modified
@@ -188,7 +192,10 @@ func listGames(gameDB *db.GameDB) {
 		fmt.Printf("    AppID: %s\n", game.AppID)
 		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
 		if len(game.Overrides) > 0 {
-			fmt.Printf("    Overrides: %v\n", game.Overrides)
+			fmt.Println("    Overrides:")
+			for _, k := range slices.Sorted(maps.Keys(game.Overrides)) {
+				fmt.Printf("      %s: %s\n", k, game.Overrides[k])
+			}
 		}
 		if len(game.Remove) > 0 {
 			fmt.Printf("    Remove: %v\n", game.Remove)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +50,10 @@ func TestFilterGames_All(t *testing.T) {
 	gameFilter = ""
 	defer func() { gameFilter = original }()
 
-	games := filterGames(gameDB)
+	games, err := filterGames(gameDB)
+	if err != nil {
+		t.Fatalf("filterGames() error: %v", err)
+	}
 	if len(games) != len(gameDB.Games) {
 		t.Errorf("filterGames() returned %d games, want %d", len(games), len(gameDB.Games))
 	}
@@ -63,7 +65,10 @@ func TestFilterGames_ByName(t *testing.T) {
 	gameFilter = "final_fantasy_vii_remake"
 	defer func() { gameFilter = original }()
 
-	games := filterGames(gameDB)
+	games, err := filterGames(gameDB)
+	if err != nil {
+		t.Fatalf("filterGames() error: %v", err)
+	}
 	if len(games) != 1 {
 		t.Fatalf("filterGames() returned %d games, want 1", len(games))
 	}
@@ -78,9 +83,9 @@ func TestFilterGames_NotFound(t *testing.T) {
 	gameFilter = "no_such_game"
 	defer func() { gameFilter = original }()
 
-	games := filterGames(gameDB)
-	if games != nil {
-		t.Errorf("filterGames() returned %v, want nil for nonexistent game", games)
+	_, err := filterGames(gameDB)
+	if err == nil {
+		t.Error("filterGames() expected error for nonexistent game, got nil")
 	}
 }
 
@@ -145,7 +150,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 
 	// Apply a patch
-	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, nil, nil)
+	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// Write the patch
 	modified, err := writePatch(profileDB, dbPath)
@@ -186,7 +191,7 @@ func TestWritePatch_NoMetadata(t *testing.T) {
 	}
 
 	// Apply patch
-	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", []string{"uwp"}, nil, nil)
+	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// writePatch should succeed even without metadata.json
 	modified, err := writePatch(profileDB, dbPath)
@@ -231,7 +236,10 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 	profileDB := newTestProfileDB(t)
 	gameDB := newTestGameDB()
 
-	games := filterGames(gameDB)
+	games, err := filterGames(gameDB)
+	if err != nil {
+		t.Fatalf("filterGames() error: %v", err)
+	}
 	applyPatches(profileDB, games)
 
 	tmpDir := t.TempDir()
@@ -440,9 +448,6 @@ func TestFindFingerprintDB(t *testing.T) {
 		t.Errorf("findFingerprintDB() = %q, want %q", got, ontologyPath)
 	}
 }
-
-// fmt.Sprintf is used in the filterGames "not found" message
-var _ = fmt.Sprintf
 
 func TestResolveGamesCustomFile(t *testing.T) {
 	original := gamesJSONPath

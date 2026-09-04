@@ -6,7 +6,6 @@ import (
 	"io"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -42,16 +41,6 @@ type XmlElement struct {
 	Children []XmlElement `xml:",any"`
 }
 
-// AttrValue returns the value of an attribute by name, or empty string.
-func (e *XmlElement) AttrValue(name string) string {
-	for _, a := range e.Attr {
-		if a.Name.Local == name {
-			return a.Value
-		}
-	}
-	return ""
-}
-
 // ElementName returns the local XML element name (without namespace).
 func (e *XmlElement) ElementName() string {
 	return e.XMLName.Local
@@ -85,17 +74,12 @@ func ParseProfileDB(path string) (*ProfileDB, error) {
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-
-	var db ProfileDB
-	if err := xml.Unmarshal(data, &db); err != nil {
+	var pdb ProfileDB
+	if err := xml.NewDecoder(f).Decode(&pdb); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 
-	return &db, nil
+	return &pdb, nil
 }
 
 // WriteProfileDB writes the ProfileDB to a file with XML header.
@@ -119,31 +103,24 @@ func BackupFile(path string) error {
 	if _, err := os.Stat(bakPath); err == nil {
 		return nil
 	}
-	return copyFile(path, bakPath)
-}
 
-// copyFile copies src to dst, creating the destination directory if needed.
-func copyFile(srcPath, dstPath string) error {
-	src, err := os.Open(srcPath)
+	src, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("opening %s: %w", srcPath, err)
+		return fmt.Errorf("opening %s: %w", path, err)
 	}
 	defer src.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-	dst, err := os.Create(dstPath)
+	dst, err := os.Create(bakPath)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", dstPath, err)
+		return fmt.Errorf("creating %s: %w", bakPath, err)
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("copying file: %w", err)
+		return fmt.Errorf("copying %s to %s: %w", path, bakPath, err)
 	}
 	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("syncing %s: %w", dstPath, err)
+		return fmt.Errorf("syncing %s: %w", bakPath, err)
 	}
 	return nil
 }
@@ -205,7 +182,7 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 	}
 	built := Version{
 		Name:     name,
-		Elements: make([]XmlElement, 0, len(src.Elements)),
+		Elements: make([]XmlElement, 0, len(src.Elements)+len(overrideSet)),
 	}
 	copyPreservedElements(&built, src, removeSet, overrideSet)
 	applyOverrides(&built, overrideSet)
@@ -243,13 +220,11 @@ func buildUWPForcedFields(appID string) map[string]string {
 // defaults that user overrides take priority over.
 func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string][2]string {
 	overrideSet := make(map[string][2]string, len(overrides)+len(forcedFields))
-	for k, v := range forcedFields {
-		nameLower := strings.ToLower(k)
-		overrideSet[nameLower] = [2]string{k, v}
-	}
-	for k, v := range overrides {
-		nameLower := strings.ToLower(k)
-		overrideSet[nameLower] = [2]string{k, v}
+	// forcedFields first so user overrides take priority.
+	for _, fields := range []map[string]string{forcedFields, overrides} {
+		for k, v := range fields {
+			overrideSet[strings.ToLower(k)] = [2]string{k, v}
+		}
 	}
 	return overrideSet
 }

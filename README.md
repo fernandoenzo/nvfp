@@ -1,51 +1,51 @@
-# nvidia-uwp-patch
+# nvfp
 
-Parchea la base de datos de perfiles de NVIDIA App (`fingerprint.db`) para que reconozca juegos **UWP / Microsoft Store** que NVIDIA no detecta de forma nativa.
+Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UWP / Microsoft Store** games that NVIDIA doesn't detect natively — and tweaks existing game entries through a simple JSON manifest.
 
-## El problema
+## The problem
 
-NVIDIA App mantiene una base de datos XML (`fingerprint.db`) que asocia juegos con su plataforma (Steam, Epic, GOG…). Los juegos UWP (Microsoft Store / Xbox PC) no aparecen, así que NVIDIA App no les aplica perfiles gráficos, no los lista, y no permite optimizarlos.
+NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
 
-Esta herramienta localiza esa base de datos, la parchea con las entradas que faltan, y hace backup antes de tocar nada.
+This tool locates that database, patches it with the missing entries (or updates existing ones), and backs up the original before touching anything.
 
-## Requisitos
+## Requirements
 
 - Windows 10/11
-- **NVIDIA App** instalada (la versión moderna, no GeForce Experience)
-- **Windows Terminal** o **PowerShell 7** — no uses CMD. El programa imprime caracteres Unicode (✓ ⊘ ✗) que CMD no renderiza.
+- **NVIDIA App** installed (the modern one, not GeForce Experience)
+- **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
-## Uso
+## Usage
 
-### Parchear todo (modo por defecto)
+### Patch everything (default mode)
 
 ```powershell
-.\nvidia-uwp-patch.exe
+.\nvfp.exe
 ```
 
 ```
-Processing: C:\Users\TuUsuario\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\ApplicationOntology\data\fingerprint.db
+Processing: C:\Users\You\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\ApplicationOntology\data\fingerprint.db
   ✓ added uwp version(s) of "final_fantasy_vii_remake"
   ⊘ fingerprint "starfield" already has uwp version(s)
   ✗ fingerprint "nonexistent_game" not found in database
 ```
 
-Cada símbolo significa:
-- **✓** — parcheado (versión añadida o actualizada)
-- **⊘** — ya estaba bien, nada que hacer
-- **✗** — no se pudo (fingerprint no encontrada, o sin versión fuente para UWP)
+What each symbol means:
+- **✓** — patched (version added or updated)
+- **⊘** — already correct, nothing to do
+- **✗** — failed (fingerprint not found, or no source version to build UWP from)
 
-### Ver qué se cambiaría sin tocar nada
+### Preview changes without writing anything
 
 ```powershell
-.\nvidia-uwp-patch.exe --dry-run
+.\nvfp.exe --dry-run
 ```
 
-Mismo output pero sin escribir a disco. Útil para verificar antes de ejecutar de verdad.
+Same output, but nothing is written to disk. Useful to verify before running for real.
 
-### Listar los juegos del manifiesto
+### List games in the manifest
 
 ```powershell
-.\nvidia-uwp-patch.exe --list
+.\nvfp.exe --list
 ```
 
 ```
@@ -57,27 +57,27 @@ Total games: 3
     UWPPackageFamilyName: 39EA002F.EXED1_n746a19ndrrjg
 ```
 
-### Parchear un solo juego
+### Patch a single game
 
 ```powershell
-.\nvidia-uwp-patch.exe --game final_fantasy_vii_remake
+.\nvfp.exe --game final_fantasy_vii_remake
 ```
 
-Si el fingerprint no existe en el manifiesto, sale con error (exit code ≠ 0).
+If the fingerprint doesn't exist in the manifest, the program exits with an error (non-zero exit code).
 
-### Usar un manifiesto local propio
+### Use your own local manifest
 
 ```powershell
-.\nvidia-uwp-patch.exe --games-json .\mi-lista.json
+.\nvfp.exe --games-json .\my-list.json
 ```
 
-Ignora el remoto y el caché — usa exclusivamente tu fichero. Si el fichero es inválido, falla explícitamente.
+Ignores the remote manifest and the cache — uses your file exclusively. If the file is invalid, it fails loudly.
 
-## El manifiesto (`games.json`)
+## The manifest (`games.json`)
 
-Define qué juegos parchear y cómo. El programa lo descarga automáticamente desde este repo (con fallback a copia embebida y caché local).
+Defines which games to patch and how. The program downloads it automatically from this repo (with embedded copy and local cache as fallbacks).
 
-### Formato
+### Format
 
 ```json
 {
@@ -92,17 +92,17 @@ Define qué juegos parchear y cómo. El programa lo descarga automáticamente de
 }
 ```
 
-### Campos
+### Fields
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `fingerprint` | string | Nombre exacto de la entrada en `fingerprint.db` (minúsculas, guiones bajos) |
-| `app_user_model_id` | string | El AppUserModelID de la app UWP: `PackageFamilyName!AppId` |
-| `versions` | []string | Versiones a asegurar: `"uwp"` (crear si falta) y/o `"steam"`, `"epic"`, etc. (actualizar si existen) |
-| `overrides` | map | Campos XML a sobreescribir o añadir en la versión |
-| `remove` | []string | Campos XML a eliminar de la versión |
+| `fingerprint` | string | Exact entry name in `fingerprint.db` (lowercase, underscores) |
+| `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
+| `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present) |
+| `overrides` | map | XML fields to overwrite or add in the version |
+| `remove` | []string | XML fields to delete from the version |
 
-### Ejemplo con overrides y removals
+### Example with overrides and removals
 
 ```json
 {
@@ -116,45 +116,45 @@ Define qué juegos parchear y cómo. El programa lo descarga automáticamente de
 }
 ```
 
-Esto:
-1. Si `uwp` no existe → la crea a partir de la versión Steam (o la primera no-UWP), con los overrides y removals aplicados
-2. Si `steam` existe → la actualiza con los mismos overrides y removals
-3. Si `uwp` ya existe sin overrides ni removals → no hace nada (idempotente)
+This:
+1. If `uwp` doesn't exist → creates it from the Steam version (or the first non-UWP one), with overrides and removals applied
+2. If `steam` exists → updates it with the same overrides and removals
+3. If `uwp` already exists and there are no overrides/removals → does nothing (idempotent)
 
-### ¿Cómo encuentro el `fingerprint` y el `app_user_model_id`?
+### How do I find the `fingerprint` and the `app_user_model_id`?
 
-**Fingerprint:** busca en `fingerprint.db` (abre con un editor de texto) el nombre del juego que quieres parchear. Es el atributo `name` del elemento `<Fingerprint>`.
+**Fingerprint:** open `fingerprint.db` with a text editor and search for the game you want to patch. It's the `name` attribute of the `<Fingerprint>` element.
 
-**AppUserModelID:** en PowerShell:
+**AppUserModelID:** in PowerShell:
 
 ```powershell
-Get-StartApps | Where-Object { $_.Name -like "*nombre del juego*" }
+Get-StartApps | Where-Object { $_.Name -like "*game name*" }
 ```
 
-Te da algo como `39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping` — eso es el ID completo.
+You'll get something like `39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping` — that's the full ID.
 
-## Qué hace exactamente
+## What it does exactly
 
-Para cada juego con `versions: ["uwp"]`:
+For each game with `versions: ["uwp"]`:
 
-1. Busca la fingerprint en `fingerprint.db`
-2. Busca la mejor versión fuente (prioridad: Steam > primera no-UWP)
-3. Crea una versión `uwp` nueva:
-   - Elimina campos específicos de otras tiendas (SteamAppIds, EpicAppId, Files, Launch…)
-   - Añade `Distributor: UWP`, `UWPPackageFamilyName`, `AppUserModelId`
-   - Aplica tus overrides y removals
-4. Hace backup de `fingerprint.db` → `fingerprint.db.bak` (solo la primera vez, no sobreescribe)
-5. Escribe la DB parcheada
+1. Finds the fingerprint in `fingerprint.db`
+2. Finds the best source version (priority: Steam > first non-UWP)
+3. Creates a new `uwp` version:
+   - Removes store-specific fields (SteamAppIds, EpicAppId, Files, Launch…)
+   - Adds `Distributor: UWP`, `UWPPackageFamilyName`, `AppUserModelId`
+   - Applies your overrides and removals
+4. Backs up `fingerprint.db` → `fingerprint.db.bak` (only the first time — never overwrites the backup)
+5. Writes the patched database
 
-## Resolución del manifiesto
+## Manifest resolution
 
-El programa busca `games.json` en este orden:
+The program looks for `games.json` in this order:
 
-1. **Remoto** (GitHub) — si hay red, descarga la última versión y la cachea
-2. **Caché local** (`%LOCALAPPDATA%\nvidia-uwp-patch\games.json`) — si no hay red pero hay caché de una descarga anterior
-3. **Embebido** en el .exe — fallback final, siempre disponible
+1. **Remote** (GitHub) — if online, downloads the latest version and caches it
+2. **Local cache** (`%LOCALAPPDATA%\nvfp\games.json`) — if offline but a previous download exists
+3. **Embedded** in the .exe — final fallback, always available
 
-Si la caché existe pero está corrupta, te avisa y cae al embebido.
+If the cache exists but is corrupt, it warns you and falls back to the embedded copy.
 
 ## Build
 
@@ -162,8 +162,19 @@ Si la caché existe pero está corrupta, te avisa y cae al embebido.
 make build
 ```
 
-Genera `nvidia-uwp-patch.exe` para Windows amd64.
+Produces `nvfp.exe` for Windows amd64.
 
-## Licencia
+### Reproducible builds
 
-Uso personal. Modifica y redistribuye libremente.
+The build is fully reproducible: the same source code always produces the same binary, regardless of the machine, OS, or filesystem layout. This is achieved with:
+
+- `-trimpath` — strips filesystem paths from the binary
+- `-buildvcs=false` — excludes VCS metadata from build info
+- `-ldflags="-s -w -buildid="` — strips debug info and build ID
+- `CGO_ENABLED=0` — pure Go, no host C toolchain dependency
+
+Two people building the same commit on different machines will get bit-for-bit identical binaries.
+
+## License
+
+Personal use. Modify and redistribute freely.

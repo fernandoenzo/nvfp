@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	gamesdb "github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
+	gamesdb "github.com/fernandoenzo/nvfp/internal/db"
 )
 
 func TestParseFingerprintDB(t *testing.T) {

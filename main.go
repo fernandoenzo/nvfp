@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/nvidia"
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/update"
+	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/nvidia"
+	"github.com/fernandoenzo/nvfp/internal/update"
 	"github.com/spf13/cobra"
 )
 

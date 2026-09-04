@@ -19,7 +19,7 @@ type GameDB struct {
 type Game struct {
 	Fingerprint string            `json:"fingerprint"`
 	AppID       string            `json:"app_id"`
-	Versions    []string          `json:"versions,omitempty"`
+	Versions    []string          `json:"versions"`
 	Overrides   map[string]string `json:"overrides,omitempty"`
 	Remove      []string          `json:"remove,omitempty"`
 }

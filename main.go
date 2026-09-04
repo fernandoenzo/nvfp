@@ -192,7 +192,7 @@ func listGames(gameDB *db.GameDB) {
 
 	for _, game := range gameDB.Games {
 		fmt.Printf("  %s\n", game.Fingerprint)
-		fmt.Printf("    AppID: %s\n", game.AppID)
+		fmt.Printf("    AppUserModelId: %s\n", game.AppUserModelID)
 		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
 		if len(game.Overrides) > 0 {
 			fmt.Println("    Overrides:")

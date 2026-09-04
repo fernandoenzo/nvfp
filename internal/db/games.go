@@ -19,11 +19,11 @@ type GameDB struct {
 
 // Game represents a single game entry in games.json.
 type Game struct {
-	Fingerprint string            `json:"fingerprint"`
-	AppID       string            `json:"app_id"`
-	Versions    []string          `json:"versions"`
-	Overrides   map[string]string `json:"overrides,omitempty"`
-	Remove      []string          `json:"remove,omitempty"`
+	Fingerprint    string            `json:"fingerprint"`
+	AppUserModelID string            `json:"app_user_model_id"`
+	Versions       []string          `json:"versions"`
+	Overrides      map[string]string `json:"overrides,omitempty"`
+	Remove         []string          `json:"remove,omitempty"`
 }
 
 // PackageFamilyName extracts the package family name from a UWP app ID
@@ -34,10 +34,10 @@ func PackageFamilyName(appID string) string {
 	return prefix
 }
 
-// UWPPackageFamilyName derives the package family name from the app_id
+// UWPPackageFamilyName derives the package family name from the app_user_model_id
 // by taking everything before the first '!'.
 func (g Game) UWPPackageFamilyName() string {
-	return PackageFamilyName(g.AppID)
+	return PackageFamilyName(g.AppUserModelID)
 }
 
 // LoadFromBytes loads the games database from raw JSON bytes.

@@ -16,11 +16,11 @@ func TestPatchOutputContent(t *testing.T) {
 	}
 
 	result := PatchGame(db, gamesdb.Game{
-		Fingerprint: "final_fantasy_vii_remake",
-		AppID:       "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
-		Versions:    []string{"uwp"},
-		Remove:      []string{"WhisperModePopsFactor"},
-		Overrides:   map[string]string{"DriverProfile": "FF7R_UWP.exe"},
+		Fingerprint:    "final_fantasy_vii_remake",
+		AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+		Versions:       []string{"uwp"},
+		Remove:         []string{"WhisperModePopsFactor"},
+		Overrides:      map[string]string{"DriverProfile": "FF7R_UWP.exe"},
 	})
 
 	if result.Status != "patched" {

@@ -16,9 +16,9 @@ func newTestGameDB() *db.GameDB {
 	return &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
-			{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
-			{Fingerprint: "epic_only_game", AppID: "EpicPkg!AppEpic", Versions: []string{"uwp"}, Overrides: map[string]string{"DriverProfile": "EpicGame.exe"}},
-			{Fingerprint: "nonexistent_in_db", AppID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
+			{Fingerprint: "epic_only_game", AppUserModelID: "EpicPkg!AppEpic", Versions: []string{"uwp"}, Overrides: map[string]string{"DriverProfile": "EpicGame.exe"}},
+			{Fingerprint: "nonexistent_in_db", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
 }
@@ -113,7 +113,7 @@ func TestApplyPatches_AlreadyUWP(t *testing.T) {
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
-			{Fingerprint: "already_uwp_game", AppID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
 
@@ -128,7 +128,7 @@ func TestApplyPatches_NotFound(t *testing.T) {
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
-			{Fingerprint: "no_such_game", AppID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "no_such_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 
 	// Apply a patch
-	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
+	nvidia.PatchGame(profileDB, db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// Write the patch
 	if err := writePatch(profileDB, dbPath); err != nil {
@@ -255,7 +255,7 @@ func TestDryRun(t *testing.T) {
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
-			{Fingerprint: "final_fantasy_vii_remake", AppID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
+			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
 		},
 	}
 
@@ -300,7 +300,7 @@ func TestPatchDB_NoChanges(t *testing.T) {
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
-			{Fingerprint: "already_uwp_game", AppID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
 
@@ -325,11 +325,11 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		Version: 1,
 		Games: []db.Game{
 			{
-				Fingerprint: "final_fantasy_vii_remake",
-				AppID:       "Pkg_abc!AppX",
-				Versions:    []string{"uwp"},
-				Overrides:   map[string]string{"DriverProfile": "custom.exe"},
-				Remove:      []string{"WhisperModePopsFactor"},
+				Fingerprint:    "final_fantasy_vii_remake",
+				AppUserModelID: "Pkg_abc!AppX",
+				Versions:       []string{"uwp"},
+				Overrides:      map[string]string{"DriverProfile": "custom.exe"},
+				Remove:         []string{"WhisperModePopsFactor"},
 			},
 		},
 	}
@@ -426,7 +426,7 @@ func TestResolveGamesCustomFile(t *testing.T) {
 	original := gamesJSONPath
 	defer func() { gamesJSONPath = original }()
 
-	custom := `{"version":1,"games":[{"fingerprint":"custom_game","app_id":"Pkg_custom!App","versions":["uwp"]}]}`
+	custom := `{"version":1,"games":[{"fingerprint":"custom_game","app_user_model_id":"Pkg_custom!App","versions":["uwp"]}]}`
 	customPath := filepath.Join(t.TempDir(), "custom.json")
 	if err := os.WriteFile(customPath, []byte(custom), 0o644); err != nil {
 		t.Fatalf("writing custom games.json: %v", err)

@@ -341,7 +341,8 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 
 	appID := "TestPkg_abc!TestApp"
 
-	// Override a forced field (Distributor) and a non-forced field
+	// Override a forced field (Distributor) and a non-forced field.
+	// Forced fields always win: Distributor must keep its default value.
 	overrides := map[string]string{
 		"Distributor":   "CustomDist",
 		"DriverProfile": "custom.exe",
@@ -356,12 +357,12 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 		seen[lower] = append(seen[lower], e.Content)
 	}
 
-	// Distributor must appear exactly once with the override value
+	// Distributor must appear exactly once with the forced default, ignoring the override
 	if count := len(seen["distributor"]); count != 1 {
 		t.Errorf("Distributor appeared %d times, want 1", count)
 	}
-	if seen["distributor"][0] != "CustomDist" {
-		t.Errorf("Distributor = %q, want CustomDist", seen["distributor"][0])
+	if seen["distributor"][0] != "UWP" {
+		t.Errorf("Distributor = %q, want UWP (forced field ignores override)", seen["distributor"][0])
 	}
 
 	// UWPPackageFamilyName must appear exactly once
@@ -380,7 +381,7 @@ func TestCloneVersion_ForcedFieldOverride(t *testing.T) {
 		t.Errorf("AppUserModelId = %q, want %s", seen["appusermodelid"][0], appID)
 	}
 
-	// Non-forced override should also work
+	// Non-forced override should still work
 	if count := len(seen["driverprofile"]); count != 1 {
 		t.Errorf("DriverProfile appeared %d times, want 1", count)
 	}
@@ -437,7 +438,8 @@ func TestCloneVersion_ForcedFieldOrder(t *testing.T) {
 		}
 	}
 
-	want := []string{"distributor", "uwppackagefamilyname", "appusermodelid"}
+	// applyOverrides emits elements sorted by lowercased key
+	want := []string{"appusermodelid", "distributor", "uwppackagefamilyname"}
 	if len(order) != len(want) {
 		t.Fatalf("forced field count = %d, want %d (got %v)", len(order), len(want), order)
 	}
@@ -488,7 +490,7 @@ func TestCloneVersion_OverrideOverridesDefaultRemove(t *testing.T) {
 	// When an override key matches a field in defaultRemoveFields (e.g., EpicAppId),
 	// the override should win: the source's EpicAppId element is skipped in
 	// copyPreservedElements (because it's in the remove set), but the override
-	// value is then added by applyNonForcedOverrides.
+	// value is then added by applyOverrides.
 	db, _ := ParseProfileDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	src := FindSourceVersion(fp)

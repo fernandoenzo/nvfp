@@ -27,7 +27,7 @@ findFingerprintDB ──► dbPath
           → FindSourceVersion → CloneVersion
 ```
 
-Three-layer architecture:
+Four-layer architecture:
 1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`, `--games-json`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching

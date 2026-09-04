@@ -1,4 +1,4 @@
-module github.com/fernandoenzo/nvidia-uwp-patch
+module github.com/fernandoenzo/nvfp
 
 go 1.27
 

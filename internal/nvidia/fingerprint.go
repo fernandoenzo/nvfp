@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/db"
 )
 
 // ---- XML model for fingerprint.db ----

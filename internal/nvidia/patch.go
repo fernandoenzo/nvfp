@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/db"
 )
 
 // PatchStatus represents the outcome of a patch operation.

@@ -48,7 +48,7 @@ Four-layer architecture:
 ```bash
 # Build (cross-compiles for Windows amd64)
 make build
-# Equivalent: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o nvidia-uwp-patch.exe .
+# Equivalent: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o nvfp.exe .
 
 # Run tests
 make test

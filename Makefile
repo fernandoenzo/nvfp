@@ -1,5 +1,5 @@
 build:
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o nvidia-uwp-patch.exe .
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o nvfp.exe .
 
 test:
 	go test ./...

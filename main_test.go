@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
-	"github.com/fernandoenzo/nvidia-uwp-patch/internal/nvidia"
+	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/nvidia"
 )
 
 // helper: create a test GameDB with known games

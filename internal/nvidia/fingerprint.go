@@ -14,8 +14,8 @@ import (
 
 // ---- XML model for fingerprint.db ----
 
-// ProfileDB is the root element of fingerprint.db.
-type ProfileDB struct {
+// FingerprintDB is the root element of fingerprint.db.
+type FingerprintDB struct {
 	XMLName      xml.Name      `xml:"FingerprintDB"`
 	Fingerprints []Fingerprint `xml:"Fingerprint"`
 }
@@ -66,24 +66,24 @@ var defaultRemoveFields = []string{
 
 // ---- Core operations ----
 
-// ParseProfileDB reads and parses a fingerprint.db file.
-func ParseProfileDB(path string) (*ProfileDB, error) {
+// ParseFingerprintDB reads and parses a fingerprint.db file.
+func ParseFingerprintDB(path string) (*FingerprintDB, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
 	defer f.Close()
 
-	var pdb ProfileDB
-	if err := xml.NewDecoder(f).Decode(&pdb); err != nil {
+	var fdb FingerprintDB
+	if err := xml.NewDecoder(f).Decode(&fdb); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 
-	return &pdb, nil
+	return &fdb, nil
 }
 
-// WriteProfileDB writes the ProfileDB to a file with XML header.
-func WriteProfileDB(db *ProfileDB, path string) error {
+// WriteFingerprintDB writes the FingerprintDB to a file with XML header.
+func WriteFingerprintDB(db *FingerprintDB, path string) error {
 	output, err := xml.MarshalIndent(db, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling XML: %w", err)
@@ -126,7 +126,7 @@ func BackupFile(path string) error {
 }
 
 // FindFingerprint finds a fingerprint by exact name.
-func FindFingerprint(db *ProfileDB, name string) *Fingerprint {
+func FindFingerprint(db *FingerprintDB, name string) *Fingerprint {
 	for i := range db.Fingerprints {
 		if db.Fingerprints[i].Name == name {
 			return &db.Fingerprints[i]

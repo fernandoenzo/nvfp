@@ -23,12 +23,12 @@ func newTestGameDB() *db.GameDB {
 	}
 }
 
-// helper: create a test ProfileDB from the testdata file
-func newTestProfileDB(t *testing.T) *nvidia.ProfileDB {
+// helper: create a test FingerprintDB from the testdata file
+func newTestFingerprintDB(t *testing.T) *nvidia.FingerprintDB {
 	t.Helper()
-	db, err := nvidia.ParseProfileDB(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
+	db, err := nvidia.ParseFingerprintDB(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
 	if err != nil {
-		t.Fatalf("ParseProfileDB failed: %v", err)
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}
 	return db
 }
@@ -90,16 +90,16 @@ func TestFilterGames_NotFound(t *testing.T) {
 }
 
 func TestApplyPatches_PatchesGame(t *testing.T) {
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := newTestGameDB()
 	games := []db.Game{gameDB.Games[0]} // final_fantasy_vii_remake
 
-	modified := applyPatches(profileDB, games)
+	modified := applyPatches(fdb, games)
 	if !modified {
 		t.Error("applyPatches() returned false, want true (game should be patched)")
 	}
 
-	fp := nvidia.FindFingerprint(profileDB, "final_fantasy_vii_remake")
+	fp := nvidia.FindFingerprint(fdb, "final_fantasy_vii_remake")
 	if fp == nil {
 		t.Fatal("fingerprint not found after patching")
 	}
@@ -109,7 +109,7 @@ func TestApplyPatches_PatchesGame(t *testing.T) {
 }
 
 func TestApplyPatches_AlreadyUWP(t *testing.T) {
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
@@ -117,14 +117,14 @@ func TestApplyPatches_AlreadyUWP(t *testing.T) {
 		},
 	}
 
-	modified := applyPatches(profileDB, gameDB.Games)
+	modified := applyPatches(fdb, gameDB.Games)
 	if modified {
 		t.Error("applyPatches() returned true for already-UWP game, want false")
 	}
 }
 
 func TestApplyPatches_NotFound(t *testing.T) {
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
@@ -132,28 +132,28 @@ func TestApplyPatches_NotFound(t *testing.T) {
 		},
 	}
 
-	modified := applyPatches(profileDB, gameDB.Games)
+	modified := applyPatches(fdb, gameDB.Games)
 	if modified {
 		t.Error("applyPatches() returned true for nonexistent game, want false")
 	}
 }
 
 func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
 
 	// Write initial DB
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("initial WriteProfileDB failed: %v", err)
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
+		t.Fatalf("initial WriteFingerprintDB failed: %v", err)
 	}
 
 	// Apply a patch
-	nvidia.PatchGame(profileDB, &db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
+	nvidia.PatchGame(fdb, &db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
 	// Write the patch
-	if err := writePatch(profileDB, dbPath); err != nil {
+	if err := writePatch(fdb, dbPath); err != nil {
 		t.Fatalf("writePatch() error: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 
 	// Written file should be parseable
-	db2, err := nvidia.ParseProfileDB(dbPath)
+	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse of written file failed: %v", err)
 	}
@@ -206,24 +206,24 @@ func TestListGames(t *testing.T) {
 
 func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 	// Full E2E: parse → patch → write → re-parse → verify
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := newTestGameDB()
 
 	games, err := filterGames(gameDB)
 	if err != nil {
 		t.Fatalf("filterGames() error: %v", err)
 	}
-	applyPatches(profileDB, games)
+	applyPatches(fdb, games)
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
 
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	// Re-parse
-	db2, err := nvidia.ParseProfileDB(dbPath)
+	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 
 func TestDryRun(t *testing.T) {
 	// Verify dryRun flag prevents file writes
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
@@ -261,8 +261,8 @@ func TestDryRun(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	// Read original file content
@@ -296,7 +296,7 @@ func TestDryRun(t *testing.T) {
 
 func TestPatchDB_NoChanges(t *testing.T) {
 	// Patching a game that already has UWP → no changes
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
@@ -306,8 +306,8 @@ func TestPatchDB_NoChanges(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	modified, err := patchDB(gameDB, dbPath)
@@ -320,7 +320,7 @@ func TestPatchDB_NoChanges(t *testing.T) {
 }
 
 func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
-	profileDB := newTestProfileDB(t)
+	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
 		Games: []db.Game{
@@ -336,8 +336,8 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
-	if err := nvidia.WriteProfileDB(profileDB, dbPath); err != nil {
-		t.Fatalf("WriteProfileDB failed: %v", err)
+	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
+		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
 	modified, err := patchDB(gameDB, dbPath)
@@ -349,7 +349,7 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 	}
 
 	// Re-parse and verify
-	db2, err := nvidia.ParseProfileDB(dbPath)
+	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}

@@ -12,12 +12,12 @@ func TestLoadFromBytes(t *testing.T) {
 		"games": [
 			{
 				"fingerprint": "test_game",
-				"app_id": "Pkg_abc!AppX",
+				"app_user_model_id": "Pkg_abc!AppX",
 				"versions": ["uwp"]
 			},
 			{
 				"fingerprint": "weird_game",
-				"app_id": "SomePkg_abc123!AppCustom",
+				"app_user_model_id": "SomePkg_abc123!AppCustom",
 				"versions": ["steam", "uwp"],
 				"overrides": {
 					"DriverProfile": "custom_exe.exe"
@@ -41,8 +41,8 @@ func TestLoadFromBytes(t *testing.T) {
 	if db.Games[0].Fingerprint != "test_game" {
 		t.Errorf("expected fingerprint test_game, got %s", db.Games[0].Fingerprint)
 	}
-	if db.Games[0].AppID != "Pkg_abc!AppX" {
-		t.Errorf("expected app_id Pkg_abc!AppX, got %s", db.Games[0].AppID)
+	if db.Games[0].AppUserModelID != "Pkg_abc!AppX" {
+		t.Errorf("expected app_user_model_id Pkg_abc!AppX, got %s", db.Games[0].AppUserModelID)
 	}
 	if db.Games[1].Overrides["DriverProfile"] != "custom_exe.exe" {
 		t.Errorf("expected override DriverProfile=custom_exe.exe")
@@ -63,7 +63,7 @@ func TestUWPPackageFamilyName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		g := Game{AppID: tt.appID}
+		g := Game{AppUserModelID: tt.appID}
 		result := g.UWPPackageFamilyName()
 		if result != tt.expected {
 			t.Errorf("UWPPackageFamilyName(%q) = %q, want %q", tt.appID, result, tt.expected)
@@ -91,7 +91,7 @@ func TestPackageFamilyName(t *testing.T) {
 
 func TestLoadFromBytesValidation(t *testing.T) {
 	t.Run("zero version rejected", func(t *testing.T) {
-		data := []byte(`{"version":0,"games":[{"fingerprint":"x","app_id":"P!A","versions":["uwp"]}]}`)
+		data := []byte(`{"version":0,"games":[{"fingerprint":"x","app_user_model_id":"P!A","versions":["uwp"]}]}`)
 		_, err := LoadFromBytes(data)
 		if err == nil {
 			t.Fatal("expected error for version 0")
@@ -105,14 +105,14 @@ func TestLoadFromBytesValidation(t *testing.T) {
 		}
 	})
 	t.Run("negative version rejected", func(t *testing.T) {
-		data := []byte(`{"version":-1,"games":[{"fingerprint":"x","app_id":"P!A","versions":["uwp"]}]}`)
+		data := []byte(`{"version":-1,"games":[{"fingerprint":"x","app_user_model_id":"P!A","versions":["uwp"]}]}`)
 		_, err := LoadFromBytes(data)
 		if err == nil {
 			t.Fatal("expected error for negative version")
 		}
 	})
 	t.Run("game without versions rejected", func(t *testing.T) {
-		data := []byte(`{"version":1,"games":[{"fingerprint":"x","app_id":"P!A"}]}`)
+		data := []byte(`{"version":1,"games":[{"fingerprint":"x","app_user_model_id":"P!A"}]}`)
 		_, err := LoadFromBytes(data)
 		if err == nil {
 			t.Fatal("expected error for game without versions")
@@ -127,7 +127,7 @@ func TestSaveAndLoad(t *testing.T) {
 	db := &GameDB{
 		Version: 1,
 		Games: []Game{
-			{Fingerprint: "test", AppID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "test", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
 
@@ -149,7 +149,7 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestResolveGamesBundled(t *testing.T) {
-	data := []byte(`{"version":1,"games":[{"fingerprint":"test","app_id":"Pkg!App","versions":["uwp"]}]}`)
+	data := []byte(`{"version":1,"games":[{"fingerprint":"test","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 
 	db, err := ResolveGames(t.TempDir(), data, nil)
 	if err != nil {
@@ -161,8 +161,8 @@ func TestResolveGamesBundled(t *testing.T) {
 }
 
 func TestResolveGamesRemote(t *testing.T) {
-	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
-	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_id":"Pkg!App2","versions":["uwp"]}]}`)
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
+	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_user_model_id":"Pkg!App2","versions":["uwp"]}]}`)
 
 	cacheDir := t.TempDir()
 	db, err := ResolveGames(cacheDir, bundled, remote)
@@ -184,8 +184,8 @@ func TestResolveGamesRemote(t *testing.T) {
 }
 
 func TestResolveGamesNoCacheDir(t *testing.T) {
-	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
-	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_id":"Pkg!App2","versions":["uwp"]}]}`)
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
+	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_user_model_id":"Pkg!App2","versions":["uwp"]}]}`)
 
 	// Empty cacheDir: remote is used but nothing is written to disk.
 	db, err := ResolveGames("", bundled, remote)
@@ -207,7 +207,7 @@ func TestResolveGamesNoCacheDir(t *testing.T) {
 }
 
 func TestResolveGamesFallbackToBundled(t *testing.T) {
-	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 	cacheDir := t.TempDir()
 
 	// No remote data, no cache → should use bundled
@@ -221,7 +221,7 @@ func TestResolveGamesFallbackToBundled(t *testing.T) {
 }
 
 func TestResolveGamesRemoteParseError(t *testing.T) {
-	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_id":"Pkg!App","versions":["uwp"]}]}`)
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 	remote := []byte(`not json`)
 	cacheDir := t.TempDir()
 	db, err := ResolveGames(cacheDir, bundled, remote)

@@ -86,7 +86,7 @@ func ensureVersion(fp *Fingerprint, game db.Game, name string) (versionOutcome, 
 	if src == nil {
 		return outcomeMissing, fmt.Errorf("no source version found for fingerprint %q", game.Fingerprint)
 	}
-	fp.Versions = append(fp.Versions, AddUWPVersion(src, game.AppID, game.Overrides, game.Remove))
+	fp.Versions = append(fp.Versions, AddUWPVersion(src, game.AppUserModelID, game.Overrides, game.Remove))
 	return outcomeAdded, nil
 }
 

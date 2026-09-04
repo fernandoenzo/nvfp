@@ -7,7 +7,7 @@ import (
 )
 
 func TestFetchGamesJSON_Success(t *testing.T) {
-	expected := []byte(`{"version":1,"games":[{"fingerprint":"test","app_id":"Pkg!App"}]}`)
+	expected := []byte(`{"version":1,"games":[{"fingerprint":"test","app_user_model_id":"Pkg!App"}]}`)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -4,9 +4,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/fernandoenzo/nvidia-uwp-patch/internal/db"
@@ -157,17 +158,6 @@ func FindFingerprint(db *ProfileDB, name string) *Fingerprint {
 	return nil
 }
 
-// HasUWPVersion checks if a fingerprint already has a UWP version.
-// Uses case-insensitive comparison for robustness.
-func HasUWPVersion(fp *Fingerprint) bool {
-	for _, v := range fp.Versions {
-		if strings.EqualFold(v.Name, "uwp") {
-			return true
-		}
-	}
-	return false
-}
-
 // FindSourceVersion finds the best source version to build a UWP version from.
 // Priority: steam > first non-uwp version.
 func FindSourceVersion(fp *Fingerprint) *Version {
@@ -278,12 +268,7 @@ func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool
 
 // applyOverrides appends override elements, sorted by key for deterministic output.
 func applyOverrides(dst *Version, overrideSet map[string][2]string) {
-	keys := make([]string, 0, len(overrideSet))
-	for k := range overrideSet {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(overrideSet)) {
 		dst.Elements = append(dst.Elements, XmlElement{
 			XMLName: xml.Name{Local: overrideSet[k][0]},
 			Content: overrideSet[k][1],

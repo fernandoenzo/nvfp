@@ -23,7 +23,7 @@ findFingerprintDB ──► dbPath
             PatchGame per game          BackupFile → WriteProfileDB
                     │
                     ▼
-          FindFingerprint → HasUWPVersion?
+          FindFingerprint → findUWPVersion?
           → FindSourceVersion → AddUWPVersion
 ```
 

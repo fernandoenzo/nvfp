@@ -34,6 +34,16 @@ func newTestProfileDB(t *testing.T) *nvidia.ProfileDB {
 	return db
 }
 
+// hasUWPVersion reports whether a fingerprint has a UWP version.
+func hasUWPVersion(fp *nvidia.Fingerprint) bool {
+	for _, v := range fp.Versions {
+		if strings.EqualFold(v.Name, "uwp") {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFilterGames_All(t *testing.T) {
 	gameDB := newTestGameDB()
 	// No filter → return all games
@@ -88,7 +98,7 @@ func TestApplyPatches_PatchesGame(t *testing.T) {
 	if fp == nil {
 		t.Fatal("fingerprint not found after patching")
 	}
-	if !nvidia.HasUWPVersion(fp) {
+	if !hasUWPVersion(fp) {
 		t.Error("fingerprint should have UWP version after patching")
 	}
 }
@@ -160,7 +170,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	if fp == nil {
 		t.Fatal("fingerprint not found after writePatch round-trip")
 	}
-	if !nvidia.HasUWPVersion(fp) {
+	if !hasUWPVersion(fp) {
 		t.Error("fingerprint should have UWP version after patching")
 	}
 }
@@ -241,7 +251,7 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 	if fp == nil {
 		t.Fatal("fingerprint not found after round-trip")
 	}
-	if !nvidia.HasUWPVersion(fp) {
+	if !hasUWPVersion(fp) {
 		t.Error("UWP version not found after round-trip")
 	}
 

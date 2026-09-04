@@ -9,7 +9,7 @@ CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft 
 ```
 games.json (bundled/embedded) ──┐
                                  ▼
-                           ResolveGames ──► GameDB
+                           resolveGames ──► db.ResolveGames
                                  │
 findFingerprintDB ──► dbPath
                                  │
@@ -28,7 +28,7 @@ findFingerprintDB ──► dbPath
 ```
 
 Three-layer architecture:
-1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`), orchestration
+1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`, `--games-json`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
 4. **Network layer** (`internal/update`): Remote games.json fetch with rate-limit safeguards
@@ -61,7 +61,7 @@ go test -v ./internal/nvidia/...
 go test -v ./internal/db/...
 ```
 
-No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` manually.
+No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 
 ## Code Conventions & Common Patterns
 
@@ -73,7 +73,8 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` man
 - **XML model**: Generic `XmlElement` struct (XMLName, Attr, Content, Children) for forward compatibility — no domain-specific structs for XML nodes.
 - **Patch result**: `PatchResult` with `Status` field: `patched`, `already_uwp`, `not_found`, `no_source`.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority).
-- **Forced field ordering**: Deterministic — `Distributor` → `UWPPackageFamilyName` → `AppUserModelId`.
+- **Forced field precedence**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` always win over user overrides (they derive from the appID).
+- **Deterministic output**: override elements are emitted sorted by lowercased key.
 - **Source version priority**: Steam > first non-UWP version found.
 - **Embedded resources**: `games.json` embedded via `//go:embed` and used as fallback.
 - **HTTP safeguards**: 10s timeout, 5MB `io.LimitReader`, custom `User-Agent` header.
@@ -85,13 +86,14 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` man
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
 | `internal/db/games.go` | `GameDB`, `Game` types, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `PatchGame`, `CloneVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
+| `internal/nvidia/fingerprint.go` | `ProfileDB`, `XmlElement`, `CloneVersion`, `ParseProfileDB`, `WriteProfileDB`, `BackupFile` |
+| `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus` and status constants |
 | `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |
 
 ## Runtime/Tooling Preferences
 
-- **Language**: Go 1.23.10+
+- **Language**: Go 1.27+
 - **Target**: Windows amd64 only (`GOOS=windows GOARCH=amd64`)
 - **Dependencies**: `github.com/spf13/cobra` v1.10.2 (CLI framework)
 - **No external test frameworks** — standard `testing` package only
@@ -99,7 +101,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` and `golint` man
 
 ## Git Workflow
 
-- **All commits must be signed** (`git commit -S` or `git commit --gpg-sign`). Unsigned commits must not be pushed.
+- **Commits are signed when the local GPG key is configured** (`git commit -S` or `git commit --gpg-sign`). Recent history contains both signed and unsigned commits; do not assume a signature requirement.
 - **Every plan execution must end with commit and push**: after all changes are verified, commit with a descriptive message and push to remote.
 - **No conventional commit prefixes** (fix:, feat:, refactor:, etc.). Commit messages go in plain natural language.
 ## Testing & QA

@@ -244,10 +244,8 @@ func buildOverrideSet(overrides map[string]string, forcedFields map[string]strin
 func copyPreservedElements(clone *Version, src *Version, removeSet map[string]bool, forcedFields map[string]string, overrideSet map[string]bool) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
-		if removeSet[nameLower] || overrideSet[nameLower] {
-			continue
-		}
-		if _, forced := forcedFields[nameLower]; forced {
+		_, forced := forcedFields[nameLower]
+		if removeSet[nameLower] || overrideSet[nameLower] || forced {
 			continue
 		}
 		clone.Elements = append(clone.Elements, elem)

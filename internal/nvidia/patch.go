@@ -24,16 +24,12 @@ type PatchResult struct {
 }
 
 // PatchGame ensures the requested versions of a game exist and carry the
-// given overrides/removals. Versions defaults to ["uwp"] when empty.
-// UWP versions are added when missing; other versions are only updated.
-// Returns a PatchResult indicating what happened.
+// given overrides/removals. UWP versions are added when missing; other
+// versions are only updated. Returns a PatchResult indicating what happened.
 func PatchGame(db *ProfileDB, fingerprint, appID string, versions, remove []string, overrides map[string]string) PatchResult {
 	fp := FindFingerprint(db, fingerprint)
 	if fp == nil {
 		return patchResult(fingerprint, StatusNotFound, "fingerprint %q not found in database", fingerprint)
-	}
-	if len(versions) == 0 {
-		versions = []string{"uwp"}
 	}
 
 	var added, updated, already, missing []string

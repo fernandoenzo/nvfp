@@ -50,6 +50,11 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 	if len(db.Games) == 0 {
 		return nil, fmt.Errorf("games database contains no games")
 	}
+	for _, g := range db.Games {
+		if len(g.Versions) == 0 {
+			return nil, fmt.Errorf("game %q has no versions", g.Fingerprint)
+		}
+	}
 	return &db, nil
 }
 

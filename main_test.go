@@ -145,7 +145,7 @@ func TestWritePatch_CreatesBackupAndWrites(t *testing.T) {
 	}
 
 	// Apply a patch
-	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil)
+	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil, nil)
 
 	// Write the patch
 	modified, err := writePatch(profileDB, dbPath)
@@ -186,7 +186,7 @@ func TestWritePatch_NoMetadata(t *testing.T) {
 	}
 
 	// Apply patch
-	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil)
+	nvidia.PatchGame(profileDB, "final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", nil, nil, nil)
 
 	// writePatch should succeed even without metadata.json
 	modified, err := writePatch(profileDB, dbPath)

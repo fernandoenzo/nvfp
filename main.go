@@ -152,14 +152,14 @@ func filterGames(gameDB *db.GameDB) []db.Game {
 func applyPatches(profileDB *nvidia.ProfileDB, games []db.Game) bool {
 	modified := false
 	for _, game := range games {
-		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Overrides, game.Remove)
+		result := nvidia.PatchGame(profileDB, game.Fingerprint, game.AppID, game.Versions, game.Remove, game.Overrides)
 		switch result.Status {
 		case nvidia.StatusPatched:
 			modified = true
 			fmt.Printf("  ✓ %s\n", result.Message)
 		case nvidia.StatusAlreadyUWP:
 			fmt.Printf("  ⊘ %s\n", result.Message)
-		case nvidia.StatusNotFound, nvidia.StatusNoSource:
+		case nvidia.StatusNotFound, nvidia.StatusNoSource, nvidia.StatusVersionNotFound:
 			fmt.Printf("  ✗ %s\n", result.Message)
 		default:
 			fmt.Printf("  ? %s (%s)\n", result.Message, result.Status)

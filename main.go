@@ -16,9 +16,10 @@ import (
 var bundledGames []byte
 
 var (
-	dryRun     bool
-	listOnly   bool
-	gameFilter string
+	dryRun        bool
+	listOnly      bool
+	gameFilter    string
+	gamesJSONPath string
 )
 
 func main() {
@@ -31,6 +32,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
 	rootCmd.Flags().BoolVar(&listOnly, "list", false, "List games in the database")
 	rootCmd.Flags().StringVar(&gameFilter, "game", "", "Patch only a specific game (by fingerprint)")
+	rootCmd.Flags().StringVar(&gamesJSONPath, "games-json", "", "Use a local games.json instead of the remote manifest")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -57,6 +59,16 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 func resolveGames() (*db.GameDB, error) {
+	if gamesJSONPath != "" {
+		// Explicit user request takes priority over remote and cache.
+		// Fail loudly instead of silently falling back to the remote list.
+		db, err := db.LoadFromPath(gamesJSONPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading custom games.json: %w", err)
+		}
+		return db, nil
+	}
+
 	cacheDir, err := getCacheDir()
 	if err != nil {
 		// Fall back to bundled only

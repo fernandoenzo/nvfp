@@ -4,7 +4,7 @@ Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UW
 
 ## The problem
 
-NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
+NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). Many UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
 
 This tool locates that database, patches it with the missing entries (or updates existing ones), and backs up the original before touching anything.
 

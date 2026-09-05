@@ -13,6 +13,9 @@
       <InstallDirRegValues>some_reg</InstallDirRegValues>
       <IsAutomatable>1</IsAutomatable>
       <WhisperModePopsFactor>0.5</WhisperModePopsFactor>
+      <CustomNested>
+        <Child>nested_value</Child>
+      </CustomNested>
     </Version>
     <Version name="epic">
       <CMSID>67890</CMSID>

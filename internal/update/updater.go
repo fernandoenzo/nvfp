@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var GamesURL = "https://github.com/fernandoenzo/nvfp/raw/main/games.json"
+var GamesURL = "https://github.com/fernandoenzo/nvfp/raw/master/games.json"
 
 // FetchGamesJSON downloads the latest games.json from GitHub.
 // Returns the raw JSON bytes or an error if the download fails.

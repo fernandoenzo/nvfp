@@ -112,6 +112,12 @@ func TestPatchOutputContent(t *testing.T) {
 		}
 	}
 
+	// Whitespace-only chardata (indentation between child elements) must not
+	// survive the round-trip as &#xA; entities.
+	if strings.Contains(content, "&#xA;") {
+		t.Error("output contains &#xA; entities from indentation whitespace")
+	}
+
 	// Verify we can round-trip
 	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {

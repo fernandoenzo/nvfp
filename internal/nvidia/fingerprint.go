@@ -78,8 +78,33 @@ func ParseFingerprintDB(path string) (*FingerprintDB, error) {
 	if err := xml.NewDecoder(f).Decode(&fdb); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	stripIndentWhitespace(&fdb)
 
 	return &fdb, nil
+}
+
+// stripIndentWhitespace removes whitespace-only chardata from every element.
+// The decoder captures the indentation between child elements as chardata;
+// xml.MarshalIndent would otherwise re-emit it as &#xA; entities, inflating
+// the file with noise on every round-trip.
+func stripIndentWhitespace(fdb *FingerprintDB) {
+	for i := range fdb.Fingerprints {
+		fp := &fdb.Fingerprints[i]
+		stripElementWhitespace(&fp.Elements)
+		for j := range fp.Versions {
+			stripElementWhitespace(&fp.Versions[j].Elements)
+		}
+	}
+}
+
+func stripElementWhitespace(elems *[]XmlElement) {
+	for i := range *elems {
+		e := &(*elems)[i]
+		if strings.TrimSpace(e.Content) == "" {
+			e.Content = ""
+		}
+		stripElementWhitespace(&e.Children)
+	}
 }
 
 // WriteFingerprintDB writes the FingerprintDB to a file with XML header.

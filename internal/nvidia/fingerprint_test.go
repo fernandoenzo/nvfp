@@ -459,6 +459,150 @@ func TestPatchGame_EnsureVersions_NoChanges(t *testing.T) {
 	}
 }
 
+func TestPatchGame_Wildcard_UpdatesAllVersions(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// final_fantasy_vii_remake has steam + epic, no uwp
+	overrides := map[string]string{"DriverProfile": "custom.exe"}
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "TestPkg!App", Versions: []string{"*"}, Overrides: overrides})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusPatched, result.Message)
+	}
+
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	// Every existing version was updated
+	for _, name := range []string{"steam", "epic"} {
+		v := findVersion(fp, name)
+		if v == nil {
+			t.Fatalf("%s version not found", name)
+		}
+		found := false
+		for _, e := range v.Elements {
+			if e.ElementName() == "DriverProfile" && e.Content == "custom.exe" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s version should have DriverProfile=custom.exe", name)
+		}
+	}
+	// UWP was added because app_user_model_id is present
+	uwp := findVersion(fp, "uwp")
+	if uwp == nil {
+		t.Fatal("UWP version should have been added")
+	}
+	seen := make(map[string]string)
+	for _, e := range uwp.Elements {
+		seen[strings.ToLower(e.ElementName())] = e.Content
+	}
+	if seen["distributor"] != "UWP" {
+		t.Errorf("Distributor = %q, want UWP", seen["distributor"])
+	}
+	if seen["uwppackagefamilyname"] != "TestPkg" {
+		t.Errorf("UWPPackageFamilyName = %q, want TestPkg", seen["uwppackagefamilyname"])
+	}
+	if seen["appusermodelid"] != "TestPkg!App" {
+		t.Errorf("AppUserModelId = %q, want TestPkg!App", seen["appusermodelid"])
+	}
+}
+
+func TestPatchGame_Wildcard_NoAumid_NoUWPAdded(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// final_fantasy_vii_remake has steam + epic, no uwp; no app_user_model_id
+	overrides := map[string]string{"DriverProfile": "custom.exe"}
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", Versions: []string{"*"}, Overrides: overrides})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusPatched, result.Message)
+	}
+
+	fp := FindFingerprint(db, "final_fantasy_vii_remake")
+	if findVersion(fp, "uwp") != nil {
+		t.Error("UWP version should NOT have been added without app_user_model_id")
+	}
+	// Existing versions were still updated
+	steam := findVersion(fp, "steam")
+	if steam == nil {
+		t.Fatal("steam version not found")
+	}
+	found := false
+	for _, e := range steam.Elements {
+		if e.ElementName() == "DriverProfile" && e.Content == "custom.exe" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("steam version should have DriverProfile=custom.exe")
+	}
+}
+
+func TestPatchGame_Wildcard_NoOverrides_Idempotent(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}})
+	if result.Status != StatusAlreadyPresent {
+		t.Errorf("status = %q, want %q", result.Status, StatusAlreadyPresent)
+	}
+}
+
+func TestPatchGame_Wildcard_ExistingUWP_Updated(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// already_uwp_game has steam + uwp
+	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}, Overrides: overrides})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusPatched, result.Message)
+	}
+
+	fp := FindFingerprint(db, "already_uwp_game")
+	// No duplicate UWP version was created
+	uwpCount := 0
+	for _, v := range fp.Versions {
+		if strings.EqualFold(v.Name, "uwp") {
+			uwpCount++
+		}
+	}
+	if uwpCount != 1 {
+		t.Errorf("UWP version count = %d, want 1", uwpCount)
+	}
+	// Both existing versions were updated
+	for _, name := range []string{"steam", "uwp"} {
+		v := findVersion(fp, name)
+		if v == nil {
+			t.Fatalf("%s version not found", name)
+		}
+		found := false
+		for _, e := range v.Elements {
+			if e.ElementName() == "DriverProfile" && e.Content == "game_uwp.exe" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s version should have DriverProfile=game_uwp.exe", name)
+		}
+	}
+}
+
+func TestPatchGame_Wildcard_NotFound(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "nonexistent_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}})
+	if result.Status != StatusNotFound {
+		t.Errorf("status = %q, want %q", result.Status, StatusNotFound)
+	}
+}
+
+func TestPatchGame_Wildcard_NoSource(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// empty_game has no versions to build a UWP from
+	result := PatchGame(db, &gamesdb.Game{Fingerprint: "empty_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}})
+	if result.Status != StatusNoSource {
+		t.Errorf("status = %q, want %q", result.Status, StatusNoSource)
+	}
+}
+
 func TestWriteAndReadRoundTrip(t *testing.T) {
 	// Parse, modify, write, re-parse
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))

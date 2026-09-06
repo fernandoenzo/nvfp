@@ -14,6 +14,11 @@
       "overrides": {
         "DLSS_Override_No_OPS": "0"
       }
+    },
+    {
+      "fingerprint": "final_fantasy_xvi",
+      "app_user_model_id": "39EA002F.Hermia_n746a19ndrrjg!Game",
+      "versions": ["uwp"]
     }
   ]
 }

@@ -44,17 +44,8 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 	if fp == nil {
 		return patchResult(StatusNotFound, "fingerprint %q not found in database", game.Fingerprint)
 	}
-	if len(game.Versions) == 1 && strings.TrimSpace(game.Versions[0]) == "*" {
-		game.Versions = make([]string, len(fp.Versions), len(fp.Versions)+1)
-		for i, version := range fp.Versions {
-			game.Versions[i] = version.Name
-		}
-		if findVersion(fp, "uwp") == nil && game.AppUserModelID != "" {
-			game.Versions = append(game.Versions, "uwp")
-		}
-	}
 	var added, updated, already, missing []string
-	for _, name := range game.Versions {
+	for _, name := range resolveVersions(fp, game) {
 		switch ensureVersion(fp, game, name) {
 		case outcomeAdded:
 			added = append(added, name)
@@ -69,6 +60,23 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 		}
 	}
 	return summarize(game.Fingerprint, added, updated, already, missing)
+}
+
+// resolveVersions returns the version names to process: the manifest list,
+// or for a "*" request every existing version plus "uwp" when the game has
+// an app_user_model_id and no UWP version exists yet.
+func resolveVersions(fp *Fingerprint, game *db.Game) []string {
+	if len(game.Versions) != 1 || strings.TrimSpace(game.Versions[0]) != "*" {
+		return game.Versions
+	}
+	names := make([]string, 0, len(fp.Versions)+1)
+	for i := range fp.Versions {
+		names = append(names, fp.Versions[i].Name)
+	}
+	if findVersion(fp, "uwp") == nil && game.AppUserModelID != "" {
+		names = append(names, "uwp")
+	}
+	return names
 }
 
 // ensureVersion makes one requested version exist and carry the game's

@@ -69,9 +69,9 @@ func resolveVersions(fp *Fingerprint, game *db.Game) []string {
 	if len(game.Versions) != 1 || strings.TrimSpace(game.Versions[0]) != "*" {
 		return game.Versions
 	}
-	names := make([]string, 0, len(fp.Versions)+1)
+	names := make([]string, len(fp.Versions), len(fp.Versions)+1)
 	for i := range fp.Versions {
-		names = append(names, fp.Versions[i].Name)
+		names[i] = fp.Versions[i].Name
 	}
 	if findVersion(fp, "uwp") == nil && game.AppUserModelID != "" {
 		names = append(names, "uwp")

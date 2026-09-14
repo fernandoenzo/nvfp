@@ -26,7 +26,7 @@ type Game struct {
 	Versions       []string          `json:"versions"`
 	Overrides      map[string]string `json:"overrides,omitempty"`
 	Remove         []string          `json:"remove,omitempty"`
-	VersionKeys    *set.Set[string]  `json:"-"`
+	versionKeys    *set.Set[string]
 }
 
 const (
@@ -48,15 +48,17 @@ func (g Game) UWPPackageFamilyName() string {
 	return PackageFamilyName(g.AppUserModelID)
 }
 
-func (g *Game) fillVersionKeys() {
-	if g.VersionKeys != nil {
-		return
+// VersionSet returns the requested versions as a set of lowercased, trimmed
+// names, so manifest lookups ignore case and stray whitespace. The set is
+// built on first use and cached; Versions must not be mutated afterwards.
+func (g *Game) VersionSet() *set.Set[string] {
+	if g.versionKeys == nil {
+		g.versionKeys = set.New[string](len(g.Versions))
+		for _, v := range g.Versions {
+			g.versionKeys.Add(strings.ToLower(strings.TrimSpace(v)))
+		}
 	}
-	g.VersionKeys = set.New[string](len(g.Versions))
-	for _, v := range g.Versions {
-		lower := strings.ToLower(strings.TrimSpace(v))
-		g.VersionKeys.Add(lower)
-	}
+	return g.versionKeys
 }
 
 // LoadFromBytes loads the games database from raw JSON bytes.
@@ -75,12 +77,12 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 		if len(g.Versions) == 0 {
 			return nil, fmt.Errorf("game %q has no versions", g.Fingerprint)
 		}
-		g.fillVersionKeys()
-		if g.VersionKeys.Contains(AllVersions) && len(g.Versions) != 1 {
-			return nil, fmt.Errorf("game %q has \"%s\" and more than one version", g.Fingerprint, AllVersions)
+		keys := g.VersionSet()
+		if keys.Contains(AllVersions) && len(g.Versions) != 1 {
+			return nil, fmt.Errorf("game %q has %q and more than one version", g.Fingerprint, AllVersions)
 		}
-		if g.VersionKeys.Contains(UWP) && g.AppUserModelID == "" {
-			return nil, fmt.Errorf("game %q has \"uwp\" but doesn't have \"AppUserModelID\"", g.Fingerprint)
+		if keys.Contains(UWP) && g.AppUserModelID == "" {
+			return nil, fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")
 		}
 	}
 	return &db, nil

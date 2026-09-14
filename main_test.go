@@ -15,7 +15,7 @@ import (
 func newTestGameDB() *db.GameDB {
 	return &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
 			{Fingerprint: "epic_only_game", AppUserModelID: "EpicPkg!AppEpic", Versions: []string{"uwp"}, Overrides: map[string]string{"DriverProfile": "EpicGame.exe"}},
 			{Fingerprint: "nonexistent_in_db", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
@@ -92,7 +92,7 @@ func TestFilterGames_NotFound(t *testing.T) {
 func TestApplyPatches_PatchesGame(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := newTestGameDB()
-	games := []db.Game{gameDB.Games[0]} // final_fantasy_vii_remake
+	games := []*db.Game{gameDB.Games[0]} // final_fantasy_vii_remake
 
 	modified := applyPatches(fdb, games)
 	if !modified {
@@ -112,7 +112,7 @@ func TestApplyPatches_AlreadyUWP(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
@@ -127,7 +127,7 @@ func TestApplyPatches_NotFound(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{Fingerprint: "no_such_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
@@ -254,7 +254,7 @@ func TestDryRun(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
 		},
 	}
@@ -299,7 +299,7 @@ func TestPatchDB_NoChanges(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
@@ -323,7 +323,7 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
-		Games: []db.Game{
+		Games: []*db.Game{
 			{
 				Fingerprint:    "final_fantasy_vii_remake",
 				AppUserModelID: "Pkg_abc!AppX",
@@ -363,7 +363,7 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 	var uwpVer *nvidia.Version
 	for i := range fp.Versions {
 		if fp.Versions[i].Name == "uwp" {
-			uwpVer = &fp.Versions[i]
+			uwpVer = fp.Versions[i]
 			break
 		}
 	}

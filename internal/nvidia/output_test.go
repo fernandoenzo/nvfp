@@ -64,7 +64,7 @@ func TestPatchOutputContent(t *testing.T) {
 	var uwpVersion *Version
 	for i := range fp.Versions {
 		if fp.Versions[i].Name == "uwp" {
-			uwpVersion = &fp.Versions[i]
+			uwpVersion = fp.Versions[i]
 			break
 		}
 	}
@@ -135,7 +135,7 @@ func TestPatchOutputContent(t *testing.T) {
 	var uwp2 *Version
 	for i := range fp2.Versions {
 		if fp2.Versions[i].Name == "uwp" {
-			uwp2 = &fp2.Versions[i]
+			uwp2 = fp2.Versions[i]
 			break
 		}
 	}

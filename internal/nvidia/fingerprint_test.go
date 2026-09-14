@@ -67,32 +67,6 @@ func TestFindFingerprint(t *testing.T) {
 	}
 }
 
-func TestFindVersion(t *testing.T) {
-	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
-
-	tests := []struct {
-		name       string
-		version    string
-		hasVersion bool
-	}{
-		{"final_fantasy_vii_remake", "uwp", false},
-		{"already_uwp_game", "uwp", true},
-		{"no_source_game", "uwp", true},
-		{"final_fantasy_vii_remake", "steam", true},
-		{"final_fantasy_vii_remake", "gog", false},
-	}
-
-	for _, tt := range tests {
-		fp := FindFingerprint(db, tt.name)
-		if fp == nil {
-			t.Fatalf("fingerprint %q not found", tt.name)
-		}
-		if (findVersion(fp, tt.version) != nil) != tt.hasVersion {
-			t.Errorf("findVersion(%q, %q) presence = %v, want %v", tt.name, tt.version, findVersion(fp, tt.version) != nil, tt.hasVersion)
-		}
-	}
-}
-
 func TestAddUWPVersion(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
@@ -1047,4 +1021,141 @@ func TestParseFingerprintDB_FingerprintDBRoot(t *testing.T) {
 	if db.XMLName.Local != "FingerprintDB" {
 		t.Errorf("root element = %q, want FingerprintDB", db.XMLName.Local)
 	}
+}
+
+// findVersion returns the version with the given name (case-insensitive), or nil.
+// package-local helper for tests: production resolves each version while
+// building the patch plan, so it no longer needs a lookup by name.
+func findVersion(fp *Fingerprint, name string) *Version {
+	for _, v := range fp.Versions {
+		if strings.EqualFold(v.Name, name) {
+			return v
+		}
+	}
+	return nil
+}
+
+func TestPatchGame_GameBuiltByHand(t *testing.T) {
+	// PatchGame must accept any *db.Game, not only values produced by
+	// LoadFromBytes: a Game literal previously dereferenced a nil set and
+	// panicked with a segmentation fault.
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "final_fantasy_vii_remake",
+		AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+		Versions:       []string{"uwp"},
+	})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusPatched, result.Message)
+	}
+	if v := findVersion(FindFingerprint(db, "final_fantasy_vii_remake"), "uwp"); v == nil {
+		t.Error("UWP version should have been added")
+	}
+}
+
+func TestPatchGame_Wildcard_ExistingUWP_NotAddedTwice(t *testing.T) {
+	// already_uwp_game has steam + uwp. A wildcard must update both and must
+	// NOT append a second uwp version.
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "already_uwp_game")
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "already_uwp_game",
+		AppUserModelID: "Pkg!App",
+		Versions:       []string{"*"},
+		Overrides:      map[string]string{"DriverProfile": "game_uwp.exe"},
+	})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusPatched, result.Message)
+	}
+
+	if len(fp.Versions) != 2 {
+		t.Fatalf("version count = %d, want 2 (%v)", len(fp.Versions), versionNames(fp))
+	}
+	if got, want := result.Message, `updated steam, uwp version(s) of "already_uwp_game"`; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+}
+
+func TestPatchGame_ExistingUWPWithNoElements_NotAddedTwice(t *testing.T) {
+	// A real UWP version with no child elements is not a request to create one.
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	fp := FindFingerprint(db, "already_uwp_game")
+	findVersion(fp, "uwp").Elements = nil
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "already_uwp_game",
+		AppUserModelID: "Pkg!App",
+		Versions:       []string{"uwp"},
+	})
+	if result.Status != StatusAlreadyPresent {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusAlreadyPresent, result.Message)
+	}
+	if n := len(fp.Versions); n != 2 {
+		t.Errorf("version count = %d, want 2 (%v)", n, versionNames(fp))
+	}
+}
+
+func TestPatchGame_MissingVersionsWithAUMID_NotNoSource(t *testing.T) {
+	// Requesting only absent versions reports version_not_found, not the
+	// "no source version" error reserved for a UWP that cannot be built.
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "already_uwp_game",
+		AppUserModelID: "Pkg!App",
+		Versions:       []string{"gog", "origin"},
+	})
+	if result.Status != StatusVersionNotFound {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusVersionNotFound, result.Message)
+	}
+	if !strings.Contains(result.Message, "gog, origin") {
+		t.Errorf("message should list the missing versions in manifest order, got %q", result.Message)
+	}
+}
+
+func TestPatchGame_UWPBeingCreated_NotReportedMissing(t *testing.T) {
+	// A uwp version the game asks for and does not have is created, so it must
+	// never be reported as missing alongside the versions that are.
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "already_uwp_game",
+		AppUserModelID: "Pkg!App",
+		Versions:       []string{"uwp", "gog"},
+	})
+	if result.Status != StatusVersionNotFound {
+		t.Fatalf("status = %q, want %q (%s)", result.Status, StatusVersionNotFound, result.Message)
+	}
+	if got, want := result.Message, `fingerprint "already_uwp_game" has none of the requested versions: gog`; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+}
+
+func TestPatchGame_Wildcard_OrderIndependentOfMapIteration(t *testing.T) {
+	// The reported message must be stable across runs: versions are reported in
+	// fingerprint order, never in map iteration order.
+	want := `added uwp version(s), updated steam, epic version(s) of "final_fantasy_vii_remake"`
+	for range 50 {
+		db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+		result := PatchGame(db, &gamesdb.Game{
+			Fingerprint:    "final_fantasy_vii_remake",
+			AppUserModelID: "TestPkg!App",
+			Versions:       []string{"*"},
+			Overrides:      map[string]string{"DriverProfile": "custom.exe"},
+		})
+		if result.Message != want {
+			t.Fatalf("message = %q, want %q", result.Message, want)
+		}
+	}
+}
+
+// versionNames returns the version names of a fingerprint in document order.
+func versionNames(fp *Fingerprint) []string {
+	names := make([]string, 0, len(fp.Versions))
+	for _, v := range fp.Versions {
+		names = append(names, v.Name)
+	}
+	return names
 }

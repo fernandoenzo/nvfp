@@ -3,10 +3,10 @@ package nvidia
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
-	"github.com/fernandoenzo/set"
 )
 
 // PatchStatus represents the outcome of a patch operation.
@@ -26,15 +26,14 @@ type PatchResult struct {
 	Message string
 }
 
-// versionOutcome classifies what ensureVersion did with one requested version.
-type versionOutcome int
-
-const (
-	outcomeAdded versionOutcome = iota
-	outcomeUpdated
-	outcomeAlready
-	outcomeNoSource
-)
+// versionPlan is the manifest request resolved against a fingerprint: the
+// existing versions to update, whether a new uwp version must be created, and
+// the requested names the fingerprint does not have.
+type versionPlan struct {
+	existing []*Version
+	addUWP   bool
+	missing  []string
+}
 
 // PatchGame ensures the requested versions of a game exist and carry the
 // given overrides/removals. UWP versions are added when missing; other
@@ -44,88 +43,84 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 	if fp == nil {
 		return patchResult(StatusNotFound, "fingerprint %q not found in database", game.Fingerprint)
 	}
-	var added, updated, already, missing []string
-	versions, missingVersions := resolveVersions(fp, game)
-	if versions.Len() == 0 {
-		return patchResult(StatusNoSource, "no source version found for fingerprint %q", game.Fingerprint)
-	}
-	for version := range versions.IterAll() {
-		switch ensureVersion(fp, game, version) {
-		case outcomeAdded:
-			added = append(added, version.Name)
-		case outcomeUpdated:
-			updated = append(updated, version.Name)
-		case outcomeAlready:
-			already = append(already, version.Name)
-		case outcomeNoSource:
-			return patchResult(StatusNoSource, "no source version found for fingerprint %q", game.Fingerprint)
-		}
-	}
-	for versionName := range missingVersions.IterAll() {
-		missing = append(missing, versionName)
-	}
-	return summarize(game.Fingerprint, added, updated, already, missing)
-}
-
-// resolveVersions returns the version names to process: the manifest list,
-// or for a "*" request every existing version plus "uwp" when the game has
-// an app_user_model_id and no UWP version exists yet.
-func resolveVersions(fp *Fingerprint, game *db.Game) (versions *set.Set[*Version], missing *set.Set[string]) {
-	versions = set.New[*Version](len(fp.Versions) + 1)
-	versionNames := set.New[string](len(fp.Versions) + 1)
-	all := game.VersionKeys.Contains(db.AllVersions)
-	hasUWP := false
-	for _, v := range fp.Versions {
-		if all {
-			versions.Add(v)
-			continue
-		}
-		versionName := strings.ToLower(strings.TrimSpace(v.Name))
-		if strings.EqualFold(versionName, db.UWP) {
-			hasUWP = true
-		}
-		if game.VersionKeys.Contains(versionName) {
-			versions.Add(v)
-			versionNames.Add(versionName)
-		}
-	}
-	if !hasUWP && (all || game.VersionKeys.Contains(db.UWP)) && game.AppUserModelID != "" {
-		versions.Add(&Version{Name: db.UWP})
-		versionNames.Add(db.UWP)
-	}
-	if !all {
-		missing = game.VersionKeys.Difference(versionNames)
-	}
-	return versions, missing
-}
-
-// ensureVersion makes one requested version exist and carry the game's
-// overrides/removals, and classifies the outcome. Only UWP versions are
-// created when missing; any other missing version is just reported.
-func ensureVersion(fp *Fingerprint, game *db.Game, version *Version) versionOutcome {
-	if strings.EqualFold(version.Name, db.UWP) && version.Elements == nil {
+	plan := resolveVersions(fp, game)
+	var added, updated, already []string
+	if plan.addUWP {
 		src := FindSourceVersion(fp)
 		if src == nil {
-			return outcomeNoSource
+			return patchResult(StatusNoSource, "no source version found for fingerprint %q", game.Fingerprint)
 		}
 		fp.Versions = append(fp.Versions, AddUWPVersion(src, game.AppUserModelID, game.Overrides, game.Remove))
-		return outcomeAdded
+		added = append(added, db.UWP)
 	}
+	for _, version := range plan.existing {
+		if applyVersion(game, version) {
+			updated = append(updated, version.Name)
+		} else {
+			already = append(already, version.Name)
+		}
+	}
+	return summarize(game.Fingerprint, added, updated, already, plan.missing)
+}
+
+// resolveVersions resolves the manifest request against the fingerprint: the
+// existing versions to update, whether a new uwp version can be created, and
+// the requested names the fingerprint does not have. A "*" request means every
+// existing version, plus uwp when the game has an AppUserModelID and lacks one.
+// A version that will be created is not reported as missing.
+func resolveVersions(fp *Fingerprint, game *db.Game) versionPlan {
+	wanted := game.VersionSet()
+	all := wanted.Contains(db.AllVersions)
+	var plan versionPlan
+	seen := make([]string, 0, len(fp.Versions))
+	hasUWP := false
+	for _, version := range fp.Versions {
+		name := strings.ToLower(strings.TrimSpace(version.Name))
+		seen = append(seen, name)
+		hasUWP = hasUWP || name == db.UWP
+		if all || wanted.Contains(name) {
+			plan.existing = append(plan.existing, version)
+		}
+	}
+	plan.addUWP = !hasUWP && (all || wanted.Contains(db.UWP)) && game.AppUserModelID != ""
+	if plan.addUWP {
+		seen = append(seen, db.UWP)
+	}
+	if !all {
+		for _, name := range game.Versions {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if !slices.Contains(seen, key) {
+				plan.missing = append(plan.missing, key)
+			}
+		}
+	}
+	return plan
+}
+
+// applyVersion updates one existing version with the game's overrides and
+// removals, reporting whether it changed. A version that already carries them
+// is left untouched.
+func applyVersion(game *db.Game, version *Version) bool {
 	if len(game.Overrides) == 0 && len(game.Remove) == 0 {
-		return outcomeAlready
+		return false
 	}
 	updated := UpdateVersion(version, game.Overrides, game.Remove)
-	// DeepEqual treats nil and empty slices as different, but both mean
-	// "no elements" — patch a version to empty, write, re-parse, patch
-	// again → Elements is nil and DeepEqual would say "not equal".
-	if len(updated.Elements) == 0 && len(version.Elements) == 0 {
-		return outcomeAlready
-	}
-	if reflect.DeepEqual(updated, version) {
-		return outcomeAlready
+	if equalElements(updated, version) {
+		return false
 	}
 	*version = *updated
-	return outcomeUpdated
+	return true
+}
+
+// equalElements reports whether a rebuilt version is identical to the original.
+// DeepEqual treats nil and empty slices as different, but both mean "no
+// elements" — patch a version to empty, write, re-parse, patch again →
+// Elements is nil and DeepEqual would say "not equal".
+func equalElements(built, original *Version) bool {
+	if len(built.Elements) == 0 && len(original.Elements) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(built, original)
 }
 
 // summarize composes the final PatchResult from the per-version outcomes.

@@ -168,7 +168,7 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 		if strings.EqualFold(version.Name, "steam") {
 			return version
 		}
-		if firstNonUWP == nil && !strings.EqualFold(version.Name, "uwp") {
+		if firstNonUWP == nil && !strings.EqualFold(version.Name, db.UWP) {
 			firstNonUWP = version
 		}
 	}
@@ -202,7 +202,7 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 
 	name := src.Name
 	if addUWP {
-		name = "uwp"
+		name = db.UWP
 	}
 	built := &Version{
 		Name:     name,

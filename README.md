@@ -98,9 +98,27 @@ Defines which games to patch and how. The program downloads it automatically fro
 |---|---|---|
 | `fingerprint` | string | Exact entry name in `fingerprint.db` (lowercase, underscores) |
 | `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
-| `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present) |
+| `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
 | `overrides` | map | XML fields to overwrite or add in the version |
 | `remove` | []string | XML fields to delete from the version |
+
+### Wildcard: patch every version at once
+
+```json
+{
+  "fingerprint": "final_fantasy_vii_remake",
+  "app_user_model_id": "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+  "versions": ["*"],
+  "overrides": {
+    "DriverProfile": "FF7R.exe"
+  }
+}
+```
+
+This updates **every** version the fingerprint has (steam, epic…) with the same
+overrides/removals, and creates a `uwp` version when `app_user_model_id` is set
+and the fingerprint doesn't have one yet. `"*"` must be the only entry in
+`versions`; the manifest is rejected otherwise.
 
 ### Example with overrides and removals
 

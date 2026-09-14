@@ -128,7 +128,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 	db := &GameDB{
 		Version: 1,
-		Games: []Game{
+		Games: []*Game{
 			{Fingerprint: "test", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 		},
 	}
@@ -299,4 +299,47 @@ func TestResolveGamesCorruptCache(t *testing.T) {
 			t.Errorf("missing cache should not warn, got %q", stderr)
 		}
 	})
+}
+
+func TestLoadFromBytes_VersionRequests(t *testing.T) {
+	tests := []struct {
+		name    string
+		game    string
+		wantErr bool
+	}{
+		{"wildcard alone", `{"fingerprint":"x","versions":["*"]}`, false},
+		{"wildcard padded and uppercase", `{"fingerprint":"x","versions":[" * "]}`, false},
+		{"wildcard with another version", `{"fingerprint":"x","versions":["*","uwp"]}`, true},
+		{"uwp without app_user_model_id", `{"fingerprint":"x","versions":["uwp"]}`, true},
+		{"uwp uppercase without app_user_model_id", `{"fingerprint":"x","versions":["UWP"]}`, true},
+		{"steam only without app_user_model_id", `{"fingerprint":"x","versions":["steam"]}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(`{"version":1,"games":[` + tt.game + `]}`)
+			_, err := LoadFromBytes(data)
+			if tt.wantErr && err == nil {
+				t.Error("expected an error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGameVersionSet(t *testing.T) {
+	g := Game{Versions: []string{" Steam ", "UWP", "gog"}}
+	got := g.VersionSet()
+	for _, want := range []string{"steam", "uwp", "gog"} {
+		if !got.Contains(want) {
+			t.Errorf("VersionSet() missing %q", want)
+		}
+	}
+	if got.Len() != 3 {
+		t.Errorf("VersionSet() len = %d, want 3", got.Len())
+	}
+	if g.VersionSet() != got {
+		t.Error("VersionSet() should return the cached set on repeated calls")
+	}
 }

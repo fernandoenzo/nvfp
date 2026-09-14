@@ -24,7 +24,7 @@ type FingerprintDB struct {
 type Fingerprint struct {
 	Name     string       `xml:"name,attr"`
 	Elements []XmlElement `xml:",any"`
-	Versions []Version    `xml:"Version"`
+	Versions []*Version   `xml:"Version"`
 }
 
 // Version represents a version element within a fingerprint.
@@ -164,13 +164,12 @@ func FindFingerprint(db *FingerprintDB, name string) *Fingerprint {
 // Priority: steam > first non-uwp version.
 func FindSourceVersion(fp *Fingerprint) *Version {
 	var firstNonUWP *Version
-	for i := range fp.Versions {
-		v := &fp.Versions[i]
-		if strings.EqualFold(v.Name, "steam") {
-			return v
+	for _, version := range fp.Versions {
+		if strings.EqualFold(version.Name, "steam") {
+			return version
 		}
-		if firstNonUWP == nil && !strings.EqualFold(v.Name, "uwp") {
-			firstNonUWP = v
+		if firstNonUWP == nil && !strings.EqualFold(version.Name, "uwp") {
+			firstNonUWP = version
 		}
 	}
 	return firstNonUWP
@@ -179,21 +178,21 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 // AddUWPVersion builds a new UWP version from a source version.
 // It removes default fields, applies overrides, adds UWP-specific fields,
 // forces Distributor to UWP, and sets the version name.
-func AddUWPVersion(src *Version, appID string, overrides map[string]string, remove []string) Version {
+func AddUWPVersion(src *Version, appID string, overrides map[string]string, remove []string) *Version {
 	return buildVersion(src, appID, overrides, remove, true)
 }
 
 // UpdateVersion rebuilds an existing version with overrides and removals.
 // Unlike AddUWPVersion, it preserves the version name and existing forced
 // fields, and only removes the explicitly listed elements.
-func UpdateVersion(src *Version, overrides map[string]string, remove []string) Version {
+func UpdateVersion(src *Version, overrides map[string]string, remove []string) *Version {
 	return buildVersion(src, "", overrides, remove, false)
 }
 
 // buildVersion builds a Version from a source, either as a new UWP addition
 // (addUWP=true: default removals and forced fields from appID) or as an update
 // of an existing version (addUWP=false: only explicit removals, no forced fields).
-func buildVersion(src *Version, appID string, overrides map[string]string, remove []string, addUWP bool) Version {
+func buildVersion(src *Version, appID string, overrides map[string]string, remove []string, addUWP bool) *Version {
 	removeSet := buildRemoveSet(remove, addUWP)
 	var forcedFields map[string]string
 	if addUWP {
@@ -205,12 +204,12 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 	if addUWP {
 		name = "uwp"
 	}
-	built := Version{
+	built := &Version{
 		Name:     name,
 		Elements: make([]XmlElement, 0, len(src.Elements)+len(overrideSet)),
 	}
-	copyPreservedElements(&built, src, removeSet, overrideSet)
-	applyOverrides(&built, overrideSet)
+	copyPreservedElements(built, src, removeSet, overrideSet)
+	applyOverrides(built, overrideSet)
 	return built
 }
 

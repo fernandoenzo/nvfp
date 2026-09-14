@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/fernandoenzo/set"
 )
 
 // GameDB represents the games.json database.
 type GameDB struct {
-	Version int    `json:"version"`
-	Games   []Game `json:"games"`
+	Version int     `json:"version"`
+	Games   []*Game `json:"games"`
 }
 
 // Game represents a single game entry in games.json.
@@ -24,7 +26,13 @@ type Game struct {
 	Versions       []string          `json:"versions"`
 	Overrides      map[string]string `json:"overrides,omitempty"`
 	Remove         []string          `json:"remove,omitempty"`
+	VersionKeys    *set.Set[string]  `json:"-"`
 }
+
+const (
+	AllVersions = "*"
+	UWP         = "uwp"
+)
 
 // PackageFamilyName extracts the package family name from a UWP app ID
 // by taking everything before the first '!'. If no '!' is present,
@@ -38,6 +46,17 @@ func PackageFamilyName(appID string) string {
 // by taking everything before the first '!'.
 func (g Game) UWPPackageFamilyName() string {
 	return PackageFamilyName(g.AppUserModelID)
+}
+
+func (g *Game) fillVersionKeys() {
+	if g.VersionKeys != nil {
+		return
+	}
+	g.VersionKeys = set.New[string](len(g.Versions))
+	for _, v := range g.Versions {
+		lower := strings.ToLower(strings.TrimSpace(v))
+		g.VersionKeys.Add(lower)
+	}
 }
 
 // LoadFromBytes loads the games database from raw JSON bytes.
@@ -55,6 +74,13 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 	for _, g := range db.Games {
 		if len(g.Versions) == 0 {
 			return nil, fmt.Errorf("game %q has no versions", g.Fingerprint)
+		}
+		g.fillVersionKeys()
+		if g.VersionKeys.Contains(AllVersions) && len(g.Versions) != 1 {
+			return nil, fmt.Errorf("game %q has \"%s\" and more than one version", g.Fingerprint, AllVersions)
+		}
+		if g.VersionKeys.Contains(UWP) && g.AppUserModelID == "" {
+			return nil, fmt.Errorf("game %q has \"uwp\" but doesn't have \"AppUserModelID\"", g.Fingerprint)
 		}
 	}
 	return &db, nil

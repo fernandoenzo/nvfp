@@ -105,7 +105,7 @@ No lint or coverage targets in the Makefile.
 
 ## Runtime/Tooling Preferences
 
-- **Language**: Go 1.27 (`go 1.27.0` in go.mod)
+- **Language**: Go 1.27, latest patch. The `go` directive in go.mod pins the newest available patch (currently `1.27.1`); bump it when a new patch ships.
 - **Target**: Windows amd64 only (`GOOS=windows GOARCH=amd64`)
 - **Direct dependencies**: `github.com/fernandoenzo/set` v1.1.0 (version-name sets), `github.com/spf13/cobra` v1.10.2 (CLI framework)
 - **No external test frameworks** — standard `testing` package only

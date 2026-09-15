@@ -1,6 +1,6 @@
 module github.com/fernandoenzo/nvfp
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/fernandoenzo/set v1.1.0

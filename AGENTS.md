@@ -77,7 +77,7 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appUserModelID; user overrides take priority over these defaults.
 - **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appUserModelID) vs `UpdateVersion` (existing version: only explicit removals, forced fields preserved).
-- **Version requests**: `versions: ["*"]` means every version the fingerprint already has, plus a new `uwp` when the game has an `app_user_model_id` and lacks one. A requested `uwp` that gets created is never reported as missing. Lookup is `Game.VersionSet()`, which lowercases and trims the names.
+- **Version requests**: `versions: ["*"]` means every version the fingerprint already has, plus a new `uwp` when the game has an `app_user_model_id` and lacks one. A requested `uwp` that gets created is never reported as missing. Lookup is `Game.VersionKeys()`, which lowercases and trims the names.
 - **Version ordering**: versions are reported in fingerprint document order, never in set iteration order; per-version results go through `applyVersion`.
 - **Deterministic output**: override elements are emitted sorted by lowercased key.
 - **Source version priority**: Steam > first non-UWP version found.

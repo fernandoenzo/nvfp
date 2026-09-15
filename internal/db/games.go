@@ -48,10 +48,10 @@ func (g Game) UWPPackageFamilyName() string {
 	return PackageFamilyName(g.AppUserModelID)
 }
 
-// VersionSet returns the requested versions as a set of lowercased, trimmed
+// VersionKeys returns the requested versions as a set of lowercased, trimmed
 // names, so manifest lookups ignore case and stray whitespace. The set is
 // built on first use and cached; Versions must not be mutated afterwards.
-func (g *Game) VersionSet() *set.Set[string] {
+func (g *Game) VersionKeys() *set.Set[string] {
 	if g.versionKeys == nil {
 		g.versionKeys = set.New[string](len(g.Versions))
 		for _, v := range g.Versions {
@@ -77,9 +77,9 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 		if len(g.Versions) == 0 {
 			return nil, fmt.Errorf("game %q has no versions", g.Fingerprint)
 		}
-		keys := g.VersionSet()
+		keys := g.VersionKeys()
 		if keys.Contains(AllVersions) && len(g.Versions) != 1 {
-			return nil, fmt.Errorf("game %q has %q and more than one version", g.Fingerprint, AllVersions)
+			return nil, fmt.Errorf("game %q: %q must be the only version", g.Fingerprint, AllVersions)
 		}
 		if keys.Contains(UWP) && g.AppUserModelID == "" {
 			return nil, fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")

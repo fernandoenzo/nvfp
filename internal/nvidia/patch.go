@@ -68,10 +68,10 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 // the requested names the fingerprint does not have. A "*" request means every
 // existing version, plus uwp when the game has an AppUserModelID and lacks one.
 // A version that will be created is not reported as missing.
-func resolveVersions(fp *Fingerprint, game *db.Game) versionPlan {
-	wanted := game.VersionSet()
+func resolveVersions(fp *Fingerprint, game *db.Game) *versionPlan {
+	wanted := game.VersionKeys()
 	all := wanted.Contains(db.AllVersions)
-	var plan versionPlan
+	plan := new(versionPlan)
 	seen := make([]string, 0, len(fp.Versions))
 	hasUWP := false
 	for _, version := range fp.Versions {

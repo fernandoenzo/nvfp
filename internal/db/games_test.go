@@ -328,18 +328,18 @@ func TestLoadFromBytes_VersionRequests(t *testing.T) {
 	}
 }
 
-func TestGameVersionSet(t *testing.T) {
+func TestGameVersionKeys(t *testing.T) {
 	g := Game{Versions: []string{" Steam ", "UWP", "gog"}}
-	got := g.VersionSet()
+	got := g.VersionKeys()
 	for _, want := range []string{"steam", "uwp", "gog"} {
 		if !got.Contains(want) {
-			t.Errorf("VersionSet() missing %q", want)
+			t.Errorf("VersionKeys() missing %q", want)
 		}
 	}
 	if got.Len() != 3 {
-		t.Errorf("VersionSet() len = %d, want 3", got.Len())
+		t.Errorf("VersionKeys() len = %d, want 3", got.Len())
 	}
-	if g.VersionSet() != got {
-		t.Error("VersionSet() should return the cached set on repeated calls")
+	if g.VersionKeys() != got {
+		t.Error("VersionKeys() should return the cached set on repeated calls")
 	}
 }

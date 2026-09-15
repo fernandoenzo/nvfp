@@ -160,8 +160,8 @@ func filterGames(gameDB *db.GameDB) ([]*db.Game, error) {
 // applyPatches patches all games and returns whether any were modified.
 func applyPatches(fdb *nvidia.FingerprintDB, games []*db.Game) bool {
 	modified := false
-	for i := range games {
-		result := nvidia.PatchGame(fdb, games[i])
+	for _, game := range games {
+		result := nvidia.PatchGame(fdb, game)
 		switch result.Status {
 		case nvidia.StatusPatched:
 			modified = true

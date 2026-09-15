@@ -31,7 +31,7 @@ Four-layer architecture:
 1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`, `--games-json`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
-4. **Network layer** (`internal/update`): Remote games.json fetch with rate-limit safeguards
+4. **Network layer** (`internal/update`): Remote games.json fetch
 
 ## Key Directories
 
@@ -46,9 +46,10 @@ Four-layer architecture:
 ## Development Commands
 
 ```bash
-# Build (cross-compiles for Windows amd64)
+# Build (cross-compiles for Windows amd64, reproducible)
 make build
-# Equivalent: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o nvfp.exe .
+# Equivalent:
+# CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o nvfp.exe .
 
 # Run tests
 make test
@@ -60,24 +61,29 @@ go test -v ./...
 # Run specific package tests
 go test -v ./internal/nvidia/...
 go test -v ./internal/db/...
+
+# Static checks (no Makefile target)
+gofmt -l .
+go vet ./...
 ```
 
-No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
+No lint or coverage targets in the Makefile.
 
 ## Code Conventions & Common Patterns
 
-- **Function length**: Max 25 lines per function. Extract helpers early.
+- **Function length**: Max 25 lines of code per function (comments excluded). Extract helpers early. One known exception: `resolveVersions` in `internal/nvidia/patch.go` (27).
 - **Error handling**: Wrap errors with context using `fmt.Errorf("...: %w", err)`. Report non-fatal failures to stderr; return error only when the caller should abort.
-- **Naming**: Standard Go conventions. Acronyms stay cased (`AppID`, `UWP`, `SHA256`).
+- **Naming**: Standard Go conventions. Acronyms stay cased (`AppUserModelID`, `UWP`, `HTTP`).
 - **Table-driven tests**: Use `[]struct{ name string; ... }` with `t.Run(tc.name, ...)`.
 - **Temp files**: Always use `t.TempDir()` for isolation; never hardcode paths.
 - **XML model**: Generic `XmlElement` struct (XMLName, Attr, Content, Children) for forward compatibility — no domain-specific structs for XML nodes.
 - **PatchGame signature**: Takes `*FingerprintDB` + `*db.Game`. All game fields (fingerprint, appUserModelID, versions, remove, overrides) come from the struct.
-- **Patch result**: `PatchResult` with `Status` + `Message` fields: `patched`, `already_present`, `not_found`, `no_source`, `version_not_found`.
-- **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write).
+- **Patch result**: `PatchResult` with `Status` + `Message` fields, typed as `PatchStatus`: `patched`, `already_present`, `not_found`, `no_source`, `version_not_found`.
+- **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write). Cache lives in `%LOCALAPPDATA%\nvidia-uwp-patch` (falls back to `~/.cache/nvidia-uwp-patch` when `LOCALAPPDATA` is unset).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appUserModelID; user overrides take priority over these defaults.
+- **JSON handling**: `Game` fields are `[]*Game` and `[]*Version`; the manifest uses `encoding/json/v2` with `json.Deterministic(true)` on save.
 - **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appUserModelID) vs `UpdateVersion` (existing version: only explicit removals, forced fields preserved).
-- **Version requests**: `versions: ["*"]` means every version the fingerprint already has, plus a new `uwp` when the game has an `app_user_model_id` and lacks one. A requested `uwp` that gets created is never reported as missing. Lookup is `Game.VersionKeys()`, which lowercases and trims the names.
+- **Version requests**: `versions: ["*"]` means every version the fingerprint already has, plus a new `uwp` when the game has an `app_user_model_id` and lacks one. `"*"` is rejected unless it is the only entry. A requested `uwp` that gets created is never reported as missing. Lookup is `Game.VersionKeys()`, which lowercases and trims the names.
 - **Version ordering**: versions are reported in fingerprint document order, never in set iteration order; per-version results go through `applyVersion`.
 - **Deterministic output**: override elements are emitted sorted by lowercased key.
 - **Source version priority**: Steam > first non-UWP version found.
@@ -90,25 +96,28 @@ No lint or coverage targets in the Makefile. Use `go vet ./...` manually.
 |---|---|
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
-| `internal/db/games.go` | `GameDB`, `Game` types, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `XmlElement`, `AddUWPVersion`, `UpdateVersion`, `ParseFingerprintDB`, `WriteFingerprintDB`, `BackupFile` |
-| `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `resolveVersions`, `summarize`, `applyVersion` |
-| `internal/update/updater.go` | `FetchGamesJSON` (HTTP fetch with safeguards) |
+| `internal/db/games.go` | `GameDB`, `Game`, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `LoadFromPath`, `SaveToPath` |
+| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `BackupFile`, `FindFingerprint`, `FindSourceVersion`, `AddUWPVersion`, `UpdateVersion` |
+| `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `resolveVersions`, `applyVersion`, `summarize` |
+| `internal/update/updater.go` | `GamesURL`, `FetchGamesJSON` |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |
+| `internal/nvidia/testdata/fingerprint_metadata.db` | Fixture with Fingerprint-level metadata (2 fingerprints) |
 
 ## Runtime/Tooling Preferences
 
-- **Language**: Go 1.27+
+- **Language**: Go 1.27 (`go 1.27.0` in go.mod)
 - **Target**: Windows amd64 only (`GOOS=windows GOARCH=amd64`)
-- **Dependencies**: `github.com/spf13/cobra` v1.10.2 (CLI framework)
+- **Direct dependencies**: `github.com/fernandoenzo/set` v1.1.0 (version-name sets), `github.com/spf13/cobra` v1.10.2 (CLI framework)
 - **No external test frameworks** — standard `testing` package only
 - **No mocking libraries** — use `httptest.NewServer` for HTTP tests
 
 ## Git Workflow
 
-- **Commits are signed when the local GPG key is configured** (`git commit -S` or `git commit --gpg-sign`). Recent history contains both signed and unsigned commits; do not assume a signature requirement.
-- **Every plan execution must end with commit and push**: after all changes are verified, commit with a descriptive message and push to remote.
+- **Every commit must be signed**: `commit.gpgsign` is set in this repo's local config, so plain `git commit` signs; in a fresh clone pass `-S` explicitly. If signing fails, stop and report; never fall back to an unsigned commit.
+- **Every plan execution must end with commit and push**: after all changes are verified, commit and push to remote.
+- **Commit messages are one short line**: a single concise subject, no body, no bullet points, no paragraph. Say what changed, not why.
 - **No conventional commit prefixes** (fix:, feat:, refactor:, etc.). Commit messages go in plain natural language.
+
 ## Testing & QA
 
 - Run all tests: `go test ./...`

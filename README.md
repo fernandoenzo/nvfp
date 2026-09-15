@@ -1,4 +1,14 @@
-# nvfp
+<p align="center">
+  <img src="nvfp.svg" alt="nvfp" width="128">
+</p>
+<h1 align="center">nvfp</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/github/go-mod/go-version/fernandoenzo/nvfp?color=00ADD8&logo=go&logoColor=white" alt="Go version">
+  <img src="https://img.shields.io/badge/Windows-11-blue" alt="Windows 11">
+  <img src="https://img.shields.io/badge/License-GPLv3+-red" alt="License: GPLv3+">
+  <img src="https://img.shields.io/github/v/release/fernandoenzo/nvfp" alt="GitHub Release">
+</p>
 
 Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UWP / Microsoft Store** games that NVIDIA doesn't detect natively — and tweaks existing game entries through a simple JSON manifest.
 
@@ -10,7 +20,7 @@ This tool locates that database, patches it with the missing entries (or updates
 
 ## Requirements
 
-- Windows 10/11
+- Windows 11
 - **NVIDIA App** installed (the modern one, not GeForce Experience)
 - **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
@@ -180,7 +190,32 @@ If the cache exists but is corrupt, it warns you and falls back to the embedded 
 make build
 ```
 
-Produces `nvfp.exe` for Windows amd64.
+Produces `nvfp.exe` for Windows amd64, with the application icon embedded as a
+Windows PE resource.
+
+### Windows icon resources
+
+The icon lives in `nvfp.ico` and is declared in the resource script `nvfp.rc`:
+
+```
+1 ICON "nvfp.ico"
+```
+
+`x86_64-w64-mingw32-windres` compiles that script into
+`nvfp_res_windows_amd64.syso`, a COFF object holding the `.rsrc` section that the
+Go linker merges into the executable. Because the name ends in
+`_windows_amd64`, the Go toolchain picks it up only when targeting Windows amd64 —
+Linux builds and `go test ./...` are unaffected.
+
+The `.syso` is committed, so `make build` needs no MinGW toolchain. Regenerate it
+only after changing `nvfp.rc` or `nvfp.ico`:
+
+```bash
+make resources   # requires x86_64-w64-mingw32-windres (apt: binutils-mingw-w64-x86-64)
+```
+
+`make build` aborts with a clear message if the `.syso` is missing, so an
+icon-less binary is never produced by accident.
 
 ### Reproducible builds
 
@@ -190,9 +225,12 @@ The build is fully reproducible: the same source code always produces the same b
 - `-buildvcs=false` — excludes VCS metadata from build info
 - `-ldflags="-s -w -buildid="` — strips debug info and build ID
 - `CGO_ENABLED=0` — pure Go, no host C toolchain dependency
+- `windres` writes no timestamps for icon resources, so the committed `.syso` — and therefore the `.exe` — is reproducible too
 
 Two people building the same commit on different machines will get bit-for-bit identical binaries.
 
 ## License
 
-Personal use. Modify and redistribute freely.
+This project is licensed under the [GNU General Public License v3 or later (GPLv3+)](https://choosealicense.com/licenses/gpl-3.0/).
+
+**Icon Attribution:** Application icon sourced from [icon-icons.com](https://icon-icons.com/icon/nvidia/103939) by Jeremiah. License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

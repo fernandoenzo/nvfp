@@ -37,7 +37,7 @@ Four-layer architecture:
 
 | Directory | Purpose |
 |---|---|
-| `.` | Entry point (`main.go`), embedded `games.json`, Makefile |
+| `.` | Entry point (`main.go`), embedded `games.json`, icon resources (`nvfp.rc`, `nvfp.ico`, `.syso`), Makefile |
 | `internal/db/` | Game manifest model, JSON I/O, resolve logic |
 | `internal/nvidia/` | Fingerprint XML parsing/patching, metadata handling |
 | `internal/nvidia/testdata/` | XML fixture files for tests |
@@ -50,6 +50,9 @@ Four-layer architecture:
 make build
 # Equivalent:
 # CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o nvfp.exe .
+
+# Regenerate the Windows resource object (app icon) from nvfp.rc — needs MinGW
+make resources
 
 # Run tests
 make test
@@ -68,6 +71,24 @@ go vet ./...
 ```
 
 No lint or coverage targets in the Makefile.
+
+### Windows icon resources
+
+The application icon is a Windows PE resource, not a Go embed. `nvfp.rc` declares
+`1 ICON "nvfp.ico"` and `x86_64-w64-mingw32-windres` compiles it into
+`nvfp_res_windows_amd64.syso`, which the Go linker merges into the `.exe` as a
+`.rsrc` section. The `_windows_amd64` suffix makes the Go toolchain ignore the
+object on every other GOOS/GOARCH, so plain `go build`/`go vet`/`go test` keep
+working on Linux.
+
+- The `.syso` is **committed**: `make build` must work without a MinGW toolchain
+  installed. It is a generated artifact, so it only changes when `nvfp.rc` or
+  `nvfp.ico` changes.
+- `make build` fails with an explicit message when the `.syso` is missing, rather
+  than silently producing an icon-less binary.
+- `windres` output is deterministic (no timestamp is written for icons), so
+  regenerating it yields a byte-identical file and the reproducible-build
+  guarantee in `README.md` still holds.
 
 ## Code Conventions & Common Patterns
 
@@ -96,6 +117,11 @@ No lint or coverage targets in the Makefile.
 |---|---|
 | `main.go` | CLI entry point, Cobra setup, orchestration functions |
 | `games.json` | Bundled game manifest (embedded at build time) |
+| `nvfp.rc` | Windows resource script declaring the application icon |
+| `nvfp.ico` | Multi-resolution application icon (7 sizes, 32–256px) |
+| `nvfp.svg` | SVG source of the icon (green/turquoise circle with the NVIDIA eye) |
+| `nvfp_res_windows_amd64.syso` | Compiled resources linked into the `.exe`; regenerate with `make resources` |
+| `LICENSE` | GPLv3 full text |
 | `internal/db/games.go` | `GameDB`, `Game`, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `LoadFromPath`, `SaveToPath` |
 | `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `BackupFile`, `FindFingerprint`, `FindSourceVersion`, `AddUWPVersion`, `UpdateVersion` |
 | `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `resolveVersions`, `applyVersion`, `summarize` |
@@ -126,3 +152,7 @@ No lint or coverage targets in the Makefile.
 - `output_test.go` validates patch output content (forced fields present, removed fields absent)
 - `updater_test.go` uses `httptest` for FetchGamesJSON error/success scenarios
 - When adding new patch behavior, add corresponding test cases to `fingerprint_test.go` and verify with a round-trip parse/write/re-parse
+
+## License
+
+GPLv3+. See `LICENSE` for the full text.

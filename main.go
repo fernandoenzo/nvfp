@@ -116,6 +116,30 @@ func findFingerprintDB() (string, error) {
 	return path, nil
 }
 
+// findDAOFingerprintDB returns the path of the working fingerprint.db stored
+// under the NVIDIA App DAO directory.
+func findDAOFingerprintDB() (string, error) {
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return "", fmt.Errorf("LOCALAPPDATA not set")
+	}
+	daoDir := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App", "NvBackend", "DAO")
+	entries, err := os.ReadDir(daoDir)
+	if err != nil {
+		return "", fmt.Errorf("reading DAO directory (is NVIDIA App installed?): %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dbPath := filepath.Join(daoDir, entry.Name(), "fingerprint.db")
+		if _, err := os.Stat(dbPath); err == nil {
+			return dbPath, nil
+		}
+	}
+	return "", fmt.Errorf("fingerprint.db not found under %s", daoDir)
+}
+
 func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 	fmt.Printf("Processing: %s\n", dbPath)
 

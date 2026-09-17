@@ -20,6 +20,7 @@ var bundledGames []byte
 var (
 	dryRun        bool
 	listOnly      bool
+	restoreFlag   bool
 	gameFilter    string
 	gamesJSONPath string
 )
@@ -34,8 +35,12 @@ func main() {
 
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
 	rootCmd.Flags().BoolVar(&listOnly, "list", false, "List games in the database")
+	rootCmd.Flags().BoolVar(&restoreFlag, "restore", false, "Restore the original fingerprint.db from the DAO copy")
 	rootCmd.Flags().StringVar(&gameFilter, "game", "", "Patch only a specific game (by fingerprint)")
 	rootCmd.Flags().StringVar(&gamesJSONPath, "games-json", "", "Use a local games.json instead of the remote manifest")
+	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
+	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
+	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -43,6 +48,11 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Restore is a local file operation: it must not depend on the manifest,
+	// the cache, or the network.
+	if restoreFlag {
+		return restoreDB()
+	}
 	gameDB, err := resolveGames()
 	if err != nil {
 		return fmt.Errorf("loading games database: %w", err)
@@ -59,6 +69,32 @@ func run(cmd *cobra.Command, args []string) error {
 
 	_, err = patchDB(gameDB, dbPath)
 	return err
+}
+
+// restoreDB overwrites the working fingerprint.db with the pristine copy kept
+// under the DAO directory, undoing every patch applied by this tool.
+func restoreDB() error {
+	src, err := findDAOFingerprintDB()
+	if err != nil {
+		return fmt.Errorf("finding the original fingerprint.db: %w", err)
+	}
+	dst, err := getFingerprintDBPath()
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		fmt.Printf("Would restore %s\n  from %s\n", dst, src)
+		return nil
+	}
+	// The working copy may be gone entirely; recreate its directory.
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
+	}
+	if err := nvidia.CopyFile(src, dst); err != nil {
+		return fmt.Errorf("restoring %s: %w", dst, err)
+	}
+	fmt.Printf("Restored %s\n  from %s\n", dst, src)
+	return nil
 }
 
 func resolveGames() (*db.GameDB, error) {
@@ -101,29 +137,51 @@ func getCacheDir() (string, error) {
 	return filepath.Join(home, ".cache", "nvidia-uwp-patch"), nil
 }
 
-// findFingerprintDB returns the path of the working fingerprint.db used by the
-// NVIDIA App ontology engine.
-func findFingerprintDB() (string, error) {
+// getNvidiaAppDir returns the NVIDIA App backend directory.
+func getNvidiaAppDir() (string, error) {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
 		return "", fmt.Errorf("LOCALAPPDATA not set")
 	}
-	path := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App",
-		"NvBackend", "ApplicationOntology", "data", "fingerprint.db")
+	dir := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App", "NvBackend")
+	if _, err := os.Stat(dir); err != nil {
+		return "", fmt.Errorf("NVIDIA App dir not found (is NVIDIA App installed?): %w", err)
+	}
+	return dir, nil
+}
+
+// getFingerprintDBPath returns the path of the working fingerprint.db without
+// requiring the file to exist, so a restore can recreate it.
+func getFingerprintDBPath() (string, error) {
+	nvidiaAppDir, err := getNvidiaAppDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(nvidiaAppDir,
+		"ApplicationOntology", "data", "fingerprint.db"), nil
+}
+
+// findFingerprintDB returns the path of the working fingerprint.db used by the
+// NVIDIA App ontology engine.
+func findFingerprintDB() (string, error) {
+	path, err := getFingerprintDBPath()
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("fingerprint.db not found (is NVIDIA App installed?): %w", err)
 	}
 	return path, nil
 }
 
-// findDAOFingerprintDB returns the path of the working fingerprint.db stored
+// findDAOFingerprintDB returns the path of the pristine fingerprint.db stored
 // under the NVIDIA App DAO directory.
 func findDAOFingerprintDB() (string, error) {
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return "", fmt.Errorf("LOCALAPPDATA not set")
+	nvidiaAppDir, err := getNvidiaAppDir()
+	if err != nil {
+		return "", err
 	}
-	daoDir := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App", "NvBackend", "DAO")
+	daoDir := filepath.Join(nvidiaAppDir, "DAO")
 	entries, err := os.ReadDir(daoDir)
 	if err != nil {
 		return "", fmt.Errorf("reading DAO directory (is NVIDIA App installed?): %w", err)
@@ -199,11 +257,8 @@ func applyPatches(fdb *nvidia.FingerprintDB, games []*db.Game) bool {
 	return modified
 }
 
-// writePatch backs up and writes the patched database.
+// writePatch writes the patched database.
 func writePatch(fdb *nvidia.FingerprintDB, dbPath string) error {
-	if err := nvidia.BackupFile(dbPath); err != nil {
-		return fmt.Errorf("backing up %s: %w", dbPath, err)
-	}
 	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
 		return fmt.Errorf("writing %s: %w", dbPath, err)
 	}

@@ -122,30 +122,26 @@ func WriteFingerprintDB(db *FingerprintDB, path string) error {
 	return nil
 }
 
-// BackupFile creates a .bak copy of the file if the backup doesn't already exist.
-func BackupFile(path string) error {
-	bakPath := path + ".bak"
-	if _, err := os.Stat(bakPath); err == nil {
-		return nil
-	}
-
-	src, err := os.Open(path)
+// CopyFile copies src over dst, overwriting dst if it exists. Unlike a backup,
+// the destination is intentionally replaced: the caller is restoring a file.
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("opening %s: %w", path, err)
+		return fmt.Errorf("opening %s: %w", src, err)
 	}
-	defer src.Close()
+	defer in.Close()
 
-	dst, err := os.Create(bakPath)
+	out, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", bakPath, err)
+		return fmt.Errorf("creating %s: %w", dst, err)
 	}
-	defer dst.Close()
+	defer out.Close()
 
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("copying %s to %s: %w", path, bakPath, err)
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
 	}
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("syncing %s: %w", bakPath, err)
+	if err := out.Sync(); err != nil {
+		return fmt.Errorf("syncing %s: %w", dst, err)
 	}
 	return nil
 }

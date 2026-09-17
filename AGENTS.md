@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft Store) game entries. It locates the working fingerprint.db (ApplicationOntology\data) on Windows, patches it with game metadata from a bundled or remotely-fetched JSON manifest, and backs up the original before writing.
+CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft Store) game entries. It locates the working fingerprint.db (ApplicationOntology\data) on Windows, patches it with game metadata from a bundled or remotely-fetched JSON manifest, and can restore the pristine copy NVIDIA App keeps under NvBackend\DAO.
 
 ## Architecture & Data Flow
 
@@ -11,8 +11,7 @@ games.json (bundled/embedded) ──┐
                                  ▼
                            resolveGames ──► db.ResolveGames
                                  │
-findFingerprintDB ──► dbPath
-                                 │
+findFingerprintDB ──► dbPath     │
                                  ▼
                             patchDB
                                  │
@@ -20,17 +19,21 @@ findFingerprintDB ──► dbPath
           ParseFingerprintDB ──► applyPatches ──► writePatch
                     │                              │
                     ▼                              ▼
-            PatchGame per game          BackupFile → WriteFingerprintDB
+            PatchGame per game          WriteFingerprintDB
                     │
                     ▼
           FindFingerprint → resolveVersions
           → FindSourceVersion → AddUWPVersion / UpdateVersion
+
+findDAOFingerprintDB ──┐  (--restore)
+                       ▼
+      getFingerprintDBPath ──► restoreDB ──► CopyFile → working fingerprint.db
 ```
 
 Four-layer architecture:
-1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--game`, `--games-json`), orchestration
+1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
-3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
+3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching, file copy
 4. **Network layer** (`internal/update`): Remote games.json fetch
 
 ## Key Directories
@@ -110,6 +113,7 @@ working on Linux.
 - **Source version priority**: Steam > first non-UWP version found.
 - **Embedded resources**: `games.json` embedded via `//go:embed` and used as fallback.
 - **HTTP safeguards**: 10s timeout, 5MB `io.LimitReader`, custom `User-Agent` header.
+- **No sidecar backups**: patching writes the working fingerprint.db in place. Undo is `--restore`, which copies the pristine `NvBackend\DAO\<hash>\fingerprint.db` (first subdirectory containing the file) over the working copy via `nvidia.CopyFile` (overwrites by design). Restore is a purely local operation: it runs before `resolveGames`, so it needs no manifest, cache or network, and it recreates the destination directory when missing. `getFingerprintDBPath` returns the path without requiring the file to exist; `findFingerprintDB` adds the existence check. `--restore` is mutually exclusive with `--list`, `--game` and `--games-json`.
 
 ## Important Files
 
@@ -123,7 +127,7 @@ working on Linux.
 | `nvfp_res_windows_amd64.syso` | Compiled resources linked into the `.exe`; regenerate with `make resources` |
 | `LICENSE` | GPLv3 full text |
 | `internal/db/games.go` | `GameDB`, `Game`, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `LoadFromPath`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `BackupFile`, `FindFingerprint`, `FindSourceVersion`, `AddUWPVersion`, `UpdateVersion` |
+| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `CopyFile`, `FindFingerprint`, `FindSourceVersion`, `AddUWPVersion`, `UpdateVersion` |
 | `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `resolveVersions`, `applyVersion`, `summarize` |
 | `internal/update/updater.go` | `GamesURL`, `FetchGamesJSON` |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |

@@ -16,7 +16,7 @@ Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UW
 
 NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). Many UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
 
-This tool locates that database, patches it with the missing entries (or updates existing ones), and backs up the original before touching anything.
+This tool locates that database, patches it with the missing entries (or updates existing ones), and can restore the pristine copy afterwards.
 
 ## Requirements
 
@@ -82,6 +82,21 @@ If the fingerprint doesn't exist in the manifest, the program exits with an erro
 ```
 
 Ignores the remote manifest and the cache — uses your file exclusively. If the file is invalid, it fails loudly.
+
+### Restore the original database
+
+```powershell
+.\nvfp.exe --restore
+```
+
+```
+Restored C:\Users\You\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\ApplicationOntology\data\fingerprint.db
+  from C:\Users\You\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\DAO\5a1f2b3c\fingerprint.db
+```
+
+Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over the working database, undoing every patch. The working copy is recreated if it is missing.
+
+`--restore` is a purely local file operation: it ignores the manifest, the cache and the network, so it also works offline. It cannot be combined with `--list`, `--game` or `--games-json`. Combine it with `--dry-run` to see which copy would be restored without writing anything.
 
 ## The manifest (`games.json`)
 
@@ -171,8 +186,10 @@ For each game with `versions: ["uwp"]`:
    - Removes store-specific fields (SteamAppIds, EpicAppId, Files, Launch…)
    - Adds `Distributor: UWP`, `UWPPackageFamilyName`, `AppUserModelId`
    - Applies your overrides and removals
-4. Backs up `fingerprint.db` → `fingerprint.db.bak` (only the first time — never overwrites the backup)
-5. Writes the patched database
+4. Writes the patched database
+
+Nothing is backed up next to it: the NVIDIA App keeps its own pristine copy
+under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
 
 ## Manifest resolution
 

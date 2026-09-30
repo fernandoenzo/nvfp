@@ -680,6 +680,8 @@ func TestResolveGamesCustomFileInvalid(t *testing.T) {
 func TestRootCmd_VersionFlag(t *testing.T) {
 	for _, arg := range []string{"--version", "-v"} {
 		t.Run(arg, func(t *testing.T) {
+			defer func() { versionFlag = false }()
+
 			cmd := newRootCmd()
 			var buf bytes.Buffer
 			cmd.SetOut(&buf)

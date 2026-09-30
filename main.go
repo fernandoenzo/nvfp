@@ -38,6 +38,7 @@ var (
 	dryRun        bool
 	listOnly      bool
 	restoreFlag   bool
+	versionFlag   bool
 	gameFilter    string
 	gamesJSONPath string
 )
@@ -46,22 +47,21 @@ var (
 // exercise the real flag wiring.
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:     "nvidia-uwp-patch",
-		Short:   "Patch NVIDIA App fingerprint.db to add UWP game profiles",
-		Version: version,
-		Args:    cobra.NoArgs,
-		RunE:    run,
+		Use:   "nvidia-uwp-patch",
+		Short: "Patch NVIDIA App fingerprint.db to add UWP game profiles",
+		Args:  cobra.NoArgs,
+		RunE:  run,
 	}
 
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
 	rootCmd.Flags().BoolVar(&listOnly, "list", false, "List games in the database")
 	rootCmd.Flags().BoolVar(&restoreFlag, "restore", false, "Restore the original fingerprint.db from the DAO copy")
+	rootCmd.Flags().BoolVarP(&versionFlag, "version", "v", false, "Print version information and exit")
 	rootCmd.Flags().StringVar(&gameFilter, "game", "", "Patch only a specific game (by fingerprint)")
 	rootCmd.Flags().StringVar(&gamesJSONPath, "games-json", "", "Use a local games.json instead of the remote manifest")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
-	rootCmd.SetVersionTemplate(versionMessage)
 
 	return rootCmd
 }
@@ -73,6 +73,12 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Version is a local, information-only operation: it must not depend on
+	// the manifest, the cache, or the network.
+	if versionFlag {
+		fmt.Fprint(cmd.OutOrStdout(), versionMessage)
+		return nil
+	}
 	// Restore is a local file operation: it must not depend on the manifest,
 	// the cache, or the network.
 	if restoreFlag {

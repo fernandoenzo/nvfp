@@ -9,8 +9,8 @@
     {
       "fingerprint": "final_fantasy_vii_rebirth",
       "app_user_model_id": "39EA002F.EXED2_n746a19ndrrjg!AppFINALFANTASYVIIREBIRTHShipping",
-      "versions": ["steam", "EGS"],
-      "remove": ["Disable_SR_Override", "PinnedSLVersion"],
+      "versions": ["*"],
+      "remove": ["PinnedSLVersion"],
       "overrides": {
         "DLSS_Override_No_OPS": "0"
       }
@@ -19,6 +19,40 @@
       "fingerprint": "final_fantasy_xvi",
       "app_user_model_id": "39EA002F.Hermia_n746a19ndrrjg!Game",
       "versions": ["uwp"]
+    },
+
+    {
+      "fingerprint": "marvels_spiderman_remastered",
+      "versions": ["*"],
+      "remove": ["Disable_FG_Override"],
+      "overrides": {
+        "DLSS_Override_No_OPS": "0"
+      }
+    },
+    {
+      "fingerprint": "marvels_spiderman_miles_morales",
+      "versions": ["*"],
+      "remove": ["Disable_FG_Override"],
+      "overrides": {
+        "DLSS_Override_No_OPS": "0"
+      }
+    },
+    {
+      "fingerprint": "marvels_spiderman_2",
+      "versions": ["*"],
+      "remove": ["PinnedSLVersion"],
+      "overrides": {
+        "DLSS_Override_No_OPS": "0"
+      }
+    },
+    {
+      "fingerprint": "starfield",
+      "app_user_model_id": "BethesdaSoftworks.ProjectGold_3275kfvn8vcwc!Game",
+      "versions": ["*"],
+      "remove": ["Disable_FG_Override"],
+      "overrides": {
+        "DLSS_Override_No_OPS": "0"
+      }
     }
   ]
 }

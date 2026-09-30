@@ -14,6 +14,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// version is the release this binary was built from.
+	version = "1.2.0"
+	// versionDate is the release date shown by --version.
+	versionDate = "2026 Sep 30"
+)
+
+// versionMessage is the banner printed by --version. It mirrors the version
+// banner of the author's other command-line tools.
+const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
+	"Copyright © 2026 Fernando Enzo Guarini\n" +
+	"License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\n" +
+	"This is free software: you are free to change and redistribute it.\n" +
+	"There is NO WARRANTY, to the extent permitted by law.\n" +
+	"\n" +
+	"Written by Fernando Enzo Guarini.\n"
+
 //go:embed games.json
 var bundledGames []byte
 
@@ -25,12 +42,15 @@ var (
 	gamesJSONPath string
 )
 
-func main() {
+// newRootCmd builds the command tree. It is separate from main so tests can
+// exercise the real flag wiring.
+func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "nvidia-uwp-patch",
-		Short: "Patch NVIDIA App fingerprint.db to add UWP game profiles",
-		Args:  cobra.NoArgs,
-		RunE:  run,
+		Use:     "nvidia-uwp-patch",
+		Short:   "Patch NVIDIA App fingerprint.db to add UWP game profiles",
+		Version: version,
+		Args:    cobra.NoArgs,
+		RunE:    run,
 	}
 
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
@@ -41,8 +61,13 @@ func main() {
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
+	rootCmd.SetVersionTemplate(versionMessage)
 
-	if err := rootCmd.Execute(); err != nil {
+	return rootCmd
+}
+
+func main() {
+	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
 }

@@ -98,6 +98,24 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 
 `--restore` is a purely local file operation: it ignores the manifest, the cache and the network, so it also works offline. It cannot be combined with `--list`, `--game` or `--games-json`. Combine it with `--dry-run` to see which copy would be restored without writing anything.
 
+### Print the version
+
+```powershell
+.\nvfp.exe --version
+```
+
+```
+nvfp 1.2.0 (2026 Sep 30)
+Copyright © 2026 Fernando Enzo Guarini
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Fernando Enzo Guarini.
+```
+
+`-v` is accepted as a shorthand.
+
 ## The manifest (`games.json`)
 
 Defines which games to patch and how. The program downloads it automatically from this repo (with embedded copy and local cache as fallbacks).

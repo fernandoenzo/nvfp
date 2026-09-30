@@ -31,7 +31,7 @@ findDAOFingerprintDB ──┐  (--restore)
 ```
 
 Four-layer architecture:
-1. **CLI layer** (`main.go`): Cobra commands, flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`), orchestration
+1. **CLI layer** (`main.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--version`), orchestration
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching, file copy
 4. **Network layer** (`internal/update`): Remote games.json fetch
@@ -112,6 +112,7 @@ working on Linux.
 - **Deterministic output**: override elements are emitted sorted by lowercased key.
 - **Source version priority**: Steam > first non-UWP version found.
 - **Embedded resources**: `games.json` embedded via `//go:embed` and used as fallback.
+- **Version banner**: `--version`/`-v` is Cobra's built-in version flag, enabled via `Command.Version` and `SetVersionTemplate(versionMessage)`. The banner is assembled in `main.go` from the `version` and `versionDate` constants; bump both on every release. Its shape mirrors the author's other CLIs (name, version, date, copyright, GPLv3+ notice, author).
 - **HTTP safeguards**: 10s timeout, 5MB `io.LimitReader`, custom `User-Agent` header.
 - **No sidecar backups**: patching writes the working fingerprint.db in place. Undo is `--restore`, which copies the pristine `NvBackend\DAO\<hash>\fingerprint.db` (first subdirectory containing the file) over the working copy via `nvidia.CopyFile` (overwrites by design). Restore is a purely local operation: it runs before `resolveGames`, so it needs no manifest, cache or network, and it recreates the destination directory when missing. `getFingerprintDBPath` returns the path without requiring the file to exist; `findFingerprintDB` adds the existence check. `--restore` is mutually exclusive with `--list`, `--game` and `--games-json`.
 
@@ -137,7 +138,7 @@ working on Linux.
 
 - **Language**: Go 1.27, latest patch. The `go` directive in go.mod pins the newest available patch (currently `1.27.1`); bump it when a new patch ships.
 - **Target**: Windows amd64 only (`GOOS=windows GOARCH=amd64`)
-- **Direct dependencies**: `github.com/fernandoenzo/set` v1.1.0 (version-name sets), `github.com/spf13/cobra` v1.10.2 (CLI framework)
+- **Direct dependencies**: `github.com/fernandoenzo/set` v1.2.6 (version-name sets), `github.com/spf13/cobra` v1.10.2 (CLI framework)
 - **No external test frameworks** — standard `testing` package only
 - **No mocking libraries** — use `httptest.NewServer` for HTTP tests
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/fernandoenzo/set"
 )
@@ -23,6 +24,8 @@ type GameDB struct {
 type Game struct {
 	Fingerprint    string            `json:"fingerprint"`
 	AppUserModelID string            `json:"app_user_model_id"`
+	DriverProfile  string            `json:"driver_profile,omitempty"`
+	DriverApp      string            `json:"driver_app,omitempty"`
 	Versions       []string          `json:"versions"`
 	Overrides      map[string]string `json:"overrides,omitempty"`
 	Remove         []string          `json:"remove,omitempty"`
@@ -33,6 +36,10 @@ const (
 	AllVersions = "*"
 	UWP         = "uwp"
 )
+
+// MaxDriverString is the maximum length of an NVAPI unicode string (2048 UTF-16
+// units including the terminating NUL).
+const MaxDriverString = 2047
 
 // PackageFamilyName extracts the package family name from a UWP app ID
 // by taking everything before the first '!'. If no '!' is present,
@@ -46,6 +53,16 @@ func PackageFamilyName(appID string) string {
 // by taking everything before the first '!'.
 func (g Game) UWPPackageFamilyName() string {
 	return PackageFamilyName(g.AppUserModelID)
+}
+
+// DriverAppString returns the string registered in the driver profile: DriverApp
+// when set, otherwise the package family name derived from AppUserModelID.
+// Empty when the game has no UWP identity and no explicit override.
+func (g Game) DriverAppString() string {
+	if g.DriverApp != "" {
+		return g.DriverApp
+	}
+	return g.UWPPackageFamilyName()
 }
 
 // VersionKeys returns the requested versions as a set of lowercased, trimmed
@@ -83,6 +100,15 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 		}
 		if keys.Contains(UWP) && g.AppUserModelID == "" {
 			return nil, fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")
+		}
+		for _, f := range []struct{ name, value string }{
+			{"driver_app", g.DriverApp},
+			{"driver_profile", g.DriverProfile},
+			{"app_user_model_id", g.AppUserModelID},
+		} {
+			if len(utf16.Encode([]rune(f.value))) > MaxDriverString {
+				return nil, fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
+			}
 		}
 	}
 	return &db, nil

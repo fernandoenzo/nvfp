@@ -343,3 +343,95 @@ func TestGameVersionKeys(t *testing.T) {
 		t.Error("VersionKeys() should return the cached set on repeated calls")
 	}
 }
+
+func TestLoadFromBytes_DriverFields(t *testing.T) {
+	data := []byte(`{
+		"version": 1,
+		"games": [
+			{
+				"fingerprint": "uwp_default",
+				"app_user_model_id": "Pkg_abc!AppX",
+				"versions": ["uwp"]
+			},
+			{
+				"fingerprint": "uwp_override",
+				"app_user_model_id": "Pkg_abc!AppX",
+				"versions": ["uwp"],
+				"driver_app": "Other.exe",
+				"driver_profile": "Some Profile"
+			},
+			{
+				"fingerprint": "plain_steam",
+				"versions": ["steam"]
+			}
+		]
+	}`)
+
+	got, err := LoadFromBytes(data)
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if got.Games[0].DriverApp != "" || got.Games[0].DriverProfile != "" {
+		t.Errorf("unset driver fields should stay empty, got %q/%q",
+			got.Games[0].DriverApp, got.Games[0].DriverProfile)
+	}
+	if got.Games[1].DriverApp != "Other.exe" {
+		t.Errorf("driver_app = %q, want Other.exe", got.Games[1].DriverApp)
+	}
+	if got.Games[1].DriverProfile != "Some Profile" {
+		t.Errorf("driver_profile = %q, want Some Profile", got.Games[1].DriverProfile)
+	}
+
+	tests := []struct {
+		name string
+		game Game
+		want string
+	}{
+		{"package family name by default", *got.Games[0], "Pkg_abc"},
+		{"explicit override wins", *got.Games[1], "Other.exe"},
+		{"no UWP identity and no override", *got.Games[2], ""},
+		{"override without app id", Game{DriverApp: "Solo.exe"}, "Solo.exe"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if driveApp := tt.game.DriverAppString(); driveApp != tt.want {
+				t.Errorf("DriverAppString() = %q, want %q", driveApp, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadFromBytes_DriverValidation(t *testing.T) {
+	// 2048 UTF-16 units is one more than the NVAPI limit.
+	tooLong := strings.Repeat("a", 2048)
+	asciiOK := strings.Repeat("a", 2047)
+	// Astral-plane runes cost two UTF-16 units each, so 1024 of them exceed
+	// the limit even though the string is shorter than 2047 runes.
+	surrogatePair := strings.Repeat("\U0001F600", 1024)
+	surrogateOK := strings.Repeat("\U0001F600", 1023) + strings.Repeat("a", 1)
+
+	tests := []struct {
+		name    string
+		game    string
+		wantErr bool
+	}{
+		{"driver_app at the limit", `{"driver_app":"` + asciiOK + `"}`, false},
+		{"driver_app over the limit", `{"driver_app":"` + tooLong + `"}`, true},
+		{"driver_app surrogate pairs over", `{"driver_app":"` + surrogatePair + `"}`, true},
+		{"driver_app surrogate pairs at the limit", `{"driver_app":"` + surrogateOK + `"}`, false},
+		{"driver_profile over the limit", `{"driver_profile":"` + tooLong + `"}`, true},
+		{"app_user_model_id over the limit", `{"app_user_model_id":"` + tooLong + `"}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(`{"version":1,"games":[{"fingerprint":"x","versions":["steam"],` + tt.game[1:] + `]}`)
+			_, err := LoadFromBytes(data)
+			if tt.wantErr && err == nil {
+				t.Error("expected an error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

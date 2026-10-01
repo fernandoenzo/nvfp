@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/set"
 )
 
 // ---- XML model for fingerprint.db ----
@@ -169,6 +170,32 @@ func FindSourceVersion(fp *Fingerprint) *Version {
 		}
 	}
 	return firstNonUWP
+}
+
+// DriverProfileCandidates returns the distinct <DriverProfile> values of every
+// version of the fingerprint, in document order. Values are trimmed, empty ones
+// skipped, and duplicates removed case-insensitively.
+func DriverProfileCandidates(fp *Fingerprint) []string {
+	if fp == nil {
+		return nil
+	}
+	var candidates []string
+	seen := set.New[string](1)
+	for _, version := range fp.Versions {
+		for _, elem := range version.Elements {
+			if elem.ElementName() != "DriverProfile" {
+				continue
+			}
+			value := strings.TrimSpace(elem.Content)
+			key := strings.ToLower(value)
+			if value == "" || seen.Contains(key) {
+				continue
+			}
+			seen.Add(key)
+			candidates = append(candidates, value)
+		}
+	}
+	return candidates
 }
 
 // AddUWPVersion builds a new UWP version from a source version.

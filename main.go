@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/nvdr"
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
 	"github.com/fernandoenzo/nvfp/internal/update"
 	"github.com/spf13/cobra"
@@ -16,9 +18,9 @@ import (
 
 const (
 	// version is the release this binary was built from.
-	version = "1.2.0"
+	version = "1.3.0"
 	// versionDate is the release date shown by --version.
-	versionDate = "2026 Sep 30"
+	versionDate = "2026 Oct 1"
 )
 
 // versionMessage is the banner printed by --version. It mirrors the version
@@ -39,6 +41,8 @@ var (
 	listOnly      bool
 	restoreFlag   bool
 	versionFlag   bool
+	noDriverFlag  bool
+	elevatedFlag  bool
 	gameFilter    string
 	gamesJSONPath string
 )
@@ -59,6 +63,9 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&versionFlag, "version", "v", false, "Print version information and exit")
 	rootCmd.Flags().StringVar(&gameFilter, "game", "", "Patch only a specific game (by fingerprint)")
 	rootCmd.Flags().StringVar(&gamesJSONPath, "games-json", "", "Use a local games.json instead of the remote manifest")
+	rootCmd.Flags().BoolVar(&noDriverFlag, "no-driver", false, "Skip patching NVIDIA driver profiles")
+	rootCmd.Flags().BoolVar(&elevatedFlag, "elevated", false, "Internal: set after the UAC relaunch")
+	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
@@ -93,13 +100,34 @@ func run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// The elevated relaunch does all the work, driver step included: never ask
+	// for UAC twice.
+	if !dryRun && !noDriverFlag && !elevatedFlag && !isElevated() && hasDriverWork(gameDB) {
+		fmt.Fprintln(os.Stderr, "Administrator privileges required: relaunching elevated (accept the UAC prompt)")
+		code, err := relaunchElevated()
+		switch {
+		case err == nil:
+			os.Exit(code)
+		case errors.Is(err, errElevationCancelled):
+			// Still unelevated: the driver step reports that it was skipped.
+		default:
+			fmt.Fprintf(os.Stderr, "Warning: could not request administrator privileges: %v\n", err)
+		}
+	}
+
 	dbPath, err := findFingerprintDB()
 	if err != nil {
 		return err
 	}
 
-	_, err = patchDB(gameDB, dbPath)
-	return err
+	fdb, _, err := patchDB(gameDB, dbPath)
+	if err != nil {
+		return err
+	}
+	if noDriverFlag {
+		return nil
+	}
+	return applyDriverStep(gameDB, fdb)
 }
 
 // restoreDB overwrites the working fingerprint.db with the pristine copy kept
@@ -229,17 +257,20 @@ func findDAOFingerprintDB() (string, error) {
 	return "", fmt.Errorf("fingerprint.db not found under %s", daoDir)
 }
 
-func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
+// patchDB patches fingerprint.db and returns the parsed database together with
+// whether anything was modified. The parsed copy is what the driver step uses
+// to derive profile candidates, so the file is never read twice.
+func patchDB(gameDB *db.GameDB, dbPath string) (*nvidia.FingerprintDB, bool, error) {
 	fmt.Printf("Processing: %s\n", dbPath)
 
 	fdb, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
-		return false, fmt.Errorf("parsing %s: %w", dbPath, err)
+		return nil, false, fmt.Errorf("parsing %s: %w", dbPath, err)
 	}
 
 	games, err := filterGames(gameDB)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	modified := applyPatches(fdb, games)
 
@@ -247,13 +278,16 @@ func patchDB(gameDB *db.GameDB, dbPath string) (bool, error) {
 		if modified {
 			fmt.Println("  (dry-run: no changes written)")
 		}
-		return modified, nil
+		return fdb, modified, nil
 	}
 	if !modified {
-		return false, nil
+		return fdb, false, nil
 	}
 
-	return true, writePatch(fdb, dbPath)
+	if err := writePatch(fdb, dbPath); err != nil {
+		return nil, false, err
+	}
+	return fdb, true, nil
 }
 
 // filterGames returns the games list, optionally filtered by --game flag.
@@ -296,6 +330,102 @@ func writePatch(fdb *nvidia.FingerprintDB, dbPath string) error {
 	return nil
 }
 
+// hasDriverWork reports whether any selected game needs a driver-profile entry.
+// The filter error is ignored on purpose: this only decides whether to request
+// elevation, and the real error is reported by the patching step.
+func hasDriverWork(gameDB *db.GameDB) bool {
+	games, err := filterGames(gameDB)
+	if err != nil {
+		return false
+	}
+	for _, game := range games {
+		if game.DriverAppString() != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// driverRequests builds one request per selected game that has a string to
+// register, with the fingerprint's executables as automatic-resolution hints.
+func driverRequests(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) []nvdr.Request {
+	games, err := filterGames(gameDB)
+	if err != nil {
+		return nil
+	}
+	var reqs []nvdr.Request
+	for _, game := range games {
+		app := game.DriverAppString()
+		if app == "" {
+			continue
+		}
+		req := nvdr.Request{
+			App:         app,
+			Profile:     game.DriverProfile,
+			Fingerprint: game.Fingerprint,
+		}
+		if fp := nvidia.FindFingerprint(fdb, game.Fingerprint); fp != nil {
+			req.Candidates = nvidia.DriverProfileCandidates(fp)
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs
+}
+
+// applyDriverStep registers every selected game's application string in its
+// NVIDIA driver profile. Failures here never mask a successful fingerprint.db
+// patch: they are reported as warnings.
+func applyDriverStep(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) error {
+	reqs := driverRequests(gameDB, fdb)
+	if len(reqs) == 0 {
+		return nil
+	}
+	if dryRun {
+		printDriverPlan(reqs)
+		return nil
+	}
+	if !isElevated() {
+		fmt.Fprintln(os.Stderr, "Warning: driver profiles skipped: administrator privileges required (run as administrator)")
+		return nil
+	}
+	results, err := nvdr.Apply(reqs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: driver profiles skipped: %v\n", err)
+		return nil
+	}
+	printDriverResults(results)
+	return nil
+}
+
+// printDriverPlan shows what the driver step would do, without touching the
+// driver database (and therefore without requesting elevation).
+func printDriverPlan(reqs []nvdr.Request) {
+	fmt.Println("Driver profiles:")
+	for _, req := range reqs {
+		if req.Profile == "" {
+			fmt.Printf("  → would register %s in driver profile for %q (auto)\n", req.App, req.Fingerprint)
+			continue
+		}
+		fmt.Printf("  → would register %s in driver profile %q\n", req.App, req.Profile)
+	}
+}
+
+// printDriverResults reports one line per request, with the same symbols the
+// fingerprint patch uses.
+func printDriverResults(results []nvdr.Result) {
+	fmt.Println("Driver profiles:")
+	for _, res := range results {
+		switch res.Status {
+		case nvdr.StatusPatched:
+			fmt.Printf("  ✓ %s\n", res.Message)
+		case nvdr.StatusAlreadyPresent:
+			fmt.Printf("  ⊘ %s\n", res.Message)
+		default:
+			fmt.Printf("  ✗ %s\n", res.Message)
+		}
+	}
+}
+
 func listGames(gameDB *db.GameDB) {
 	fmt.Printf("Games database version: %d\n", gameDB.Version)
 	fmt.Printf("Total games: %d\n\n", len(gameDB.Games))
@@ -304,6 +434,12 @@ func listGames(gameDB *db.GameDB) {
 		fmt.Printf("  %s\n", game.Fingerprint)
 		fmt.Printf("    AppUserModelId: %s\n", game.AppUserModelID)
 		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
+		if app := game.DriverAppString(); app != "" {
+			fmt.Printf("    DriverApp: %s\n", app)
+		}
+		if game.DriverProfile != "" {
+			fmt.Printf("    DriverProfile: %s\n", game.DriverProfile)
+		}
 		if len(game.Overrides) > 0 {
 			fmt.Println("    Overrides:")
 			for _, k := range slices.Sorted(maps.Keys(game.Overrides)) {

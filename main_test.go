@@ -271,7 +271,7 @@ func TestDryRun(t *testing.T) {
 	dryRun = true
 	defer func() { dryRun = originalDryRun }()
 
-	modified, err := patchDB(gameDB, dbPath)
+	_, modified, err := patchDB(gameDB, dbPath)
 	if err != nil {
 		t.Fatalf("patchDB error: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestPatchDB_NoChanges(t *testing.T) {
 		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	modified, err := patchDB(gameDB, dbPath)
+	_, modified, err := patchDB(gameDB, dbPath)
 	if err != nil {
 		t.Fatalf("patchDB error: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	modified, err := patchDB(gameDB, dbPath)
+	_, modified, err := patchDB(gameDB, dbPath)
 	if err != nil {
 		t.Fatalf("patchDB error: %v", err)
 	}
@@ -694,5 +694,118 @@ func TestRootCmd_VersionFlag(t *testing.T) {
 				t.Errorf("%s output = %q, want %q", arg, got, versionMessage)
 			}
 		})
+	}
+}
+
+func TestHasDriverWork(t *testing.T) {
+	tests := []struct {
+		name  string
+		games []*db.Game
+		// filter is applied through the --game flag inside the test
+		filter string
+		want   bool
+	}{
+		{
+			name: "game with app id",
+			games: []*db.Game{
+				{Fingerprint: "uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
+			},
+			want: true,
+		},
+		{
+			name: "explicit driver_app without app id",
+			games: []*db.Game{
+				{Fingerprint: "exe_game", DriverApp: "Game.exe", Versions: []string{"steam"}},
+			},
+			want: true,
+		},
+		{
+			name: "no game has a driver string",
+			games: []*db.Game{
+				{Fingerprint: "plain_game", Versions: []string{"steam"}},
+			},
+			want: false,
+		},
+		{
+			name: "filter selects a game without app id",
+			games: []*db.Game{
+				{Fingerprint: "uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
+				{Fingerprint: "plain_game", Versions: []string{"steam"}},
+			},
+			filter: "plain_game",
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldFilter := gameFilter
+			defer func() { gameFilter = oldFilter }()
+			gameFilter = tt.filter
+
+			got := hasDriverWork(&db.GameDB{Version: 1, Games: tt.games})
+			if got != tt.want {
+				t.Errorf("hasDriverWork() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDriverRequests(t *testing.T) {
+	fdb := newTestFingerprintDB(t)
+	gameDB := &db.GameDB{
+		Version: 1,
+		Games: []*db.Game{
+			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
+			{Fingerprint: "already_uwp_game", DriverApp: "Override.exe", DriverProfile: "The Profile", Versions: []string{"steam"}},
+			{Fingerprint: "plain_steam_game", Versions: []string{"steam"}},
+			{Fingerprint: "missing_from_fingerprint_db", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
+		},
+	}
+
+	oldFilter := gameFilter
+	defer func() { gameFilter = oldFilter }()
+	gameFilter = ""
+
+	reqs := driverRequests(gameDB, fdb)
+	if len(reqs) != 3 {
+		t.Fatalf("driverRequests() returned %d requests, want 3: %+v", len(reqs), reqs)
+	}
+
+	if reqs[0].App != "39EA002F.EXED1_n746a19ndrrjg" {
+		t.Errorf("reqs[0].App = %q, want the package family name", reqs[0].App)
+	}
+	if reqs[0].Profile != "" {
+		t.Errorf("reqs[0].Profile = %q, want empty (automatic resolution)", reqs[0].Profile)
+	}
+	want := []string{"FF7R.exe", "FF7R_Epic.exe"}
+	if len(reqs[0].Candidates) != len(want) {
+		t.Fatalf("reqs[0].Candidates = %v, want %v", reqs[0].Candidates, want)
+	}
+	for i := range want {
+		if reqs[0].Candidates[i] != want[i] {
+			t.Errorf("reqs[0].Candidates[%d] = %q, want %q", i, reqs[0].Candidates[i], want[i])
+		}
+	}
+
+	if reqs[1].App != "Override.exe" {
+		t.Errorf("reqs[1].App = %q, want Override.exe", reqs[1].App)
+	}
+	if reqs[1].Profile != "The Profile" {
+		t.Errorf("reqs[1].Profile = %q, want The Profile", reqs[1].Profile)
+	}
+
+	// A game whose fingerprint is absent has no candidates to try.
+	if reqs[2].Fingerprint != "missing_from_fingerprint_db" || len(reqs[2].Candidates) != 0 {
+		t.Errorf("reqs[2] = %+v, want no candidates", reqs[2])
+	}
+
+	// The --game filter narrows the request list as well.
+	gameFilter = "plain_steam_game"
+	if got := driverRequests(gameDB, fdb); len(got) != 0 {
+		t.Errorf("driverRequests() with --game plain_steam_game = %+v, want none", got)
+	}
+	gameFilter = "final_fantasy_vii_remake"
+	if got := driverRequests(gameDB, fdb); len(got) != 1 || got[0].Fingerprint != "final_fantasy_vii_remake" {
+		t.Errorf("driverRequests() with --game final_fantasy_vii_remake = %+v, want one", got)
 	}
 }

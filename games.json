@@ -9,6 +9,7 @@
     {
       "fingerprint": "final_fantasy_vii_rebirth",
       "app_user_model_id": "39EA002F.EXED2_n746a19ndrrjg!AppFINALFANTASYVIIREBIRTHShipping",
+      "driver_app": "ff7rebirth.exe",
       "versions": ["*"],
       "remove": ["PinnedSLVersion"],
       "overrides": {

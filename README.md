@@ -10,18 +10,21 @@
   <img src="https://img.shields.io/github/v/release/fernandoenzo/nvfp" alt="GitHub Release">
 </p>
 
-Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UWP / Microsoft Store** games that NVIDIA doesn't detect natively — and tweaks existing game entries through a simple JSON manifest.
+Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UWP / Microsoft Store** games that NVIDIA doesn't detect natively — registers them in the **NVIDIA driver's own profile database** so ReBAR/DLSS overrides actually apply — and tweaks existing game entries through a simple JSON manifest.
 
 ## The problem
 
 NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). Many UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
 
-This tool locates that database, patches it with the missing entries (or updates existing ones), and can restore the pristine copy afterwards.
+Fixing `fingerprint.db` alone is not enough. The driver keeps a separate profile database (`%ProgramData%\NVIDIA Corporation\Drs\nvdrsdb0.bin` / `nvdrsdb1.bin`) where every profile lists the executables that activate it. UWP profiles do not contain the package family name, so when the game launches the driver doesn't recognize it and injects nothing (no ReBAR, no DLSS overrides…). Tools like NvidiaProfileInspectorRevamped fix this by hand through NVAPI; this tool does it automatically, in the same pass as the `fingerprint.db` patch.
+
+This tool locates both databases, patches `fingerprint.db` with the missing entries (or updates existing ones), registers the package family name in the matching driver profile through NVAPI, and can restore the pristine `fingerprint.db` afterwards.
 
 ## Requirements
 
 - Windows 11
 - **NVIDIA App** installed (the modern one, not GeForce Experience)
+- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched.
 - **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
 ## Usage
@@ -37,12 +40,18 @@ Processing: C:\Users\You\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\A
   ✓ added uwp version(s) of "final_fantasy_vii_remake"
   ⊘ fingerprint "starfield" already has uwp version(s)
   ✗ fingerprint "nonexistent_game" not found in database
+Driver profiles:
+  ✓ added 39EA002F.EXED1_n746a19ndrrjg to driver profile "Final Fantasy VII Remake"
+  ⊘ F1Manager.exe already in driver profile "F1 Manager"
+  ✗ adding SomePkg_abc to driver profile "Some Game" failed: administrator privileges required
 ```
 
+A UAC prompt appears once before the driver profiles are written. The password/consent dialog is the only interruption: after it, both databases are patched in the same run.
+
 What each symbol means:
-- **✓** — patched (version added or updated)
+- **✓** — patched (version added or updated; application registered in the driver profile)
 - **⊘** — already correct, nothing to do
-- **✗** — failed (fingerprint not found, or no source version to build UWP from)
+- **✗** — failed (fingerprint not found, no source version to build UWP from, driver profile missing or conflicting)
 
 ### Preview changes without writing anything
 
@@ -51,6 +60,24 @@ What each symbol means:
 ```
 
 Same output, but nothing is written to disk. Useful to verify before running for real.
+
+For the driver step, `--dry-run` prints the plan instead of the result and does not request elevation or touch the driver database:
+
+```
+Driver profiles:
+  → would register 39EA002F.EXED1_n746a19ndrrjg in driver profile for "final_fantasy_vii_remake" (auto)
+  → would register Custom.exe in driver profile "Named Profile"
+```
+
+`(auto)` means the profile is resolved from the fingerprint's `<DriverProfile>` executables at run time; nothing is consulted in dry-run mode.
+
+### Skip the driver step
+
+```powershell
+.\nvfp.exe --no-driver
+```
+
+Patches `fingerprint.db` only. No UAC prompt, no NVAPI call: use it when you don't want to register anything in the driver profiles or when you lack administrator privileges.
 
 ### List games in the manifest
 
@@ -65,7 +92,15 @@ Total games: 3
   final_fantasy_vii_remake
     AppUserModelId: 39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping
     UWPPackageFamilyName: 39EA002F.EXED1_n746a19ndrrjg
+    DriverApp: 39EA002F.EXED1_n746a19ndrrjg
+  epic_only_game
+    AppUserModelId: 
+    UWPPackageFamilyName: 
+    DriverApp: Custom.exe
+    DriverProfile: Named Profile
 ```
+
+`DriverApp` and `DriverProfile` are only printed when set (or, for `DriverApp`, when the game has an `app_user_model_id` to derive it from).
 
 ### Patch a single game
 
@@ -96,6 +131,10 @@ Restored C:\Users\You\AppData\Local\NVIDIA Corporation\NVIDIA App\NvBackend\Appl
 
 Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over the working database, undoing every patch. The working copy is recreated if it is missing.
 
+### A note on `--restore`
+
+`--restore` only restores `fingerprint.db`: the entries added to the driver profile database are **not** removed. They are additive, and NVIDIA may legitimately publish the same entries again through an OTA profile update. To remove a driver-profile entry, use NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, which expose the full DRS editing UI.
+
 `--restore` is a purely local file operation: it ignores the manifest, the cache and the network, so it also works offline. It cannot be combined with `--list`, `--game` or `--games-json`. Combine it with `--dry-run` to see which copy would be restored without writing anything.
 
 ### Print the version
@@ -105,7 +144,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 ```
 
 ```
-nvfp 1.2.0 (2026 Sep 30)
+nvfp 1.3.0 (2026 Oct 1)
 Copyright © 2026 Fernando Enzo Guarini
 License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
@@ -141,9 +180,13 @@ Defines which games to patch and how. The program downloads it automatically fro
 |---|---|---|
 | `fingerprint` | string | Exact entry name in `fingerprint.db` (lowercase, underscores) |
 | `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
+| `driver_profile` | string | Exact profile name in the NVIDIA driver database. Omit to resolve the profile automatically from the fingerprint's `<DriverProfile>` executables |
+| `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id` |
 | `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
 | `overrides` | map | XML fields to overwrite or add in the version |
 | `remove` | []string | XML fields to delete from the version |
+
+`driver_app` and `driver_profile` are at most 2047 UTF-16 units (the NVAPI limit, measured in UTF-16 code units, not runes); the manifest is rejected otherwise.
 
 ### Wildcard: patch every version at once
 
@@ -182,6 +225,20 @@ This:
 2. If `steam` exists → updates it with the same overrides and removals
 3. If `uwp` already exists and there are no overrides/removals → does nothing (idempotent)
 
+### Example with a pinned driver profile
+
+```json
+{
+  "fingerprint": "some_uwp_game",
+  "app_user_model_id": "Pkg_abc123!AppGame",
+  "versions": ["uwp"],
+  "driver_profile": "Some Game",
+  "driver_app": "Custom.exe"
+}
+```
+
+This registers `Custom.exe` in the driver profile named `Some Game` instead of the package family name derived from `app_user_model_id`. Both fields are optional; see [Driver profiles](#driver-profiles).
+
 ### How do I find the `fingerprint` and the `app_user_model_id`?
 
 **Fingerprint:** open `fingerprint.db` with a text editor and search for the game you want to patch. It's the `name` attribute of the `<Fingerprint>` element.
@@ -194,6 +251,8 @@ Get-StartApps | Where-Object { $_.Name -like "*game name*" }
 
 You'll get something like `39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping` — that's the full ID.
 
+**Driver profile name** (only needed when automatic resolution fails): open NVIDIA Control Panel → Manage 3D settings → Program Settings, select the game and copy the exact profile name shown there. NvidiaProfileInspectorRevamped shows the same name in its profile list.
+
 ## What it does exactly
 
 For each game with `versions: ["uwp"]`:
@@ -205,9 +264,53 @@ For each game with `versions: ["uwp"]`:
    - Adds `Distributor: UWP`, `UWPPackageFamilyName`, `AppUserModelId`
    - Applies your overrides and removals
 4. Writes the patched database
+5. Registers the UWP string (package family name by default) in the game's driver profile through NVAPI, unless `--no-driver`
 
 Nothing is backed up next to it: the NVIDIA App keeps its own pristine copy
 under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
+
+## Driver profiles
+
+Registering the UWP game in `fingerprint.db` makes NVIDIA App see it. Registering the package family name in the driver profile makes the **driver** recognize the running game, which is what actually applies ReBAR, DLSS overrides and the rest.
+
+For each game with `app_user_model_id` (or an explicit `driver_app`), the program:
+
+1. Resolves the driver profile:
+   - `driver_profile` set → looked up by that exact name
+   - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. The driver stores such names lowercased, so a lowercase attempt follows each miss.
+2. Enumerates the profile's applications and skips the game if the string is already there (case-insensitive).
+3. Otherwise adds the string (the package family name, e.g. `39EA002F.EXED1_n746a19ndrrjg`) with `NvAPI_DRS_CreateApplication`, leaving every other field at zero exactly like NvidiaProfileInspectorRevamped does.
+4. Saves the database once per run, only if something was added.
+
+No profile is ever **created**: when no candidate matches, the game is reported as unresolved and the output asks you to set `driver_profile` in the manifest with the exact name shown by NVIDIA Control Panel or NvidiaProfileInspectorRevamped. Creating ad-hoc profiles would pollute the driver database and could shadow NVIDIA's own profile for the game.
+
+The step is idempotent: running the tool again reports `⊘ already in driver profile` and writes nothing. It requires administrator privileges, hence the UAC prompt.
+
+### When the profile cannot be resolved
+
+```
+Driver profiles:
+  ✗ no driver profile found for "some_uwp_game" (tried: SomeGame.exe, SomeGame_UWP.exe); set "driver_profile" in games.json
+```
+
+The fingerprint's executables matched no profile in the driver database. Open NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, find the game's profile and copy its exact name into the manifest:
+
+```json
+{
+  "fingerprint": "some_uwp_game",
+  "app_user_model_id": "Pkg_abc123!AppGame",
+  "versions": ["uwp"],
+  "driver_profile": "Some Game"
+}
+```
+
+Run the tool again and the profile is found by name. If the game genuinely has no driver profile at all, that is NVIDIA's job to publish (it arrives with OTA profile updates); `nvfp` deliberately does not invent one.
+
+### Elevation
+
+The program checks its own token before touching anything. Unelevated, and with driver work pending, it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written.
+
+If you decline the prompt, or the relaunch fails, the driver step is skipped with an explicit warning and `fingerprint.db` is still patched (exit code 0).
 
 ## Manifest resolution
 

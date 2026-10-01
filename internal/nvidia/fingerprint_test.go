@@ -1174,3 +1174,72 @@ func versionNames(fp *Fingerprint) []string {
 	}
 	return names
 }
+
+func TestDriverProfileCandidates(t *testing.T) {
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	if err != nil {
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		fingerprint string
+		want        []string
+	}{
+		{
+			name:        "distinct executables in document order",
+			fingerprint: "final_fantasy_vii_remake",
+			want:        []string{"FF7R.exe", "FF7R_Epic.exe"},
+		},
+		{
+			name:        "duplicates removed case-insensitively",
+			fingerprint: "already_uwp_game",
+			want:        []string{"game.exe"},
+		},
+		{
+			name:        "no DriverProfile element",
+			fingerprint: "no_source_game",
+			want:        nil,
+		},
+		{
+			name:        "fingerprint without versions",
+			fingerprint: "empty_game",
+			want:        nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DriverProfileCandidates(FindFingerprint(db, tt.fingerprint))
+			if len(got) != len(tt.want) {
+				t.Fatalf("DriverProfileCandidates(%q) = %v, want %v", tt.fingerprint, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("DriverProfileCandidates(%q)[%d] = %q, want %q", tt.fingerprint, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+
+	t.Run("nil fingerprint and empty values", func(t *testing.T) {
+		if got := DriverProfileCandidates(nil); got != nil {
+			t.Errorf("DriverProfileCandidates(nil) = %v, want nil", got)
+		}
+		fp := &Fingerprint{
+			Name: "synthetic",
+			Versions: []*Version{
+				{Name: "steam", Elements: []XmlElement{
+					{XMLName: xml.Name{Local: "DriverProfile"}, Content: "  Spaced.exe  "},
+					{XMLName: xml.Name{Local: "DriverProfile"}, Content: "   "},
+				}},
+				{Name: "epic", Elements: []XmlElement{
+					{XMLName: xml.Name{Local: "DriverProfile"}, Content: "spaced.exe"},
+				}},
+			},
+		}
+		got := DriverProfileCandidates(fp)
+		if len(got) != 1 || got[0] != "Spaced.exe" {
+			t.Errorf("DriverProfileCandidates() = %v, want [Spaced.exe]", got)
+		}
+	})
+}

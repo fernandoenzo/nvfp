@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft Store) game entries. It locates the working fingerprint.db (ApplicationOntology\data) on Windows, patches it with game metadata from a bundled or remotely-fetched JSON manifest, and can restore the pristine copy NVIDIA App keeps under NvBackend\DAO.
+CLI tool that patches the NVIDIA App fingerprint database to add UWP (Microsoft Store) game entries and registers those games in the NVIDIA driver profile database (DRS) through NVAPI. It locates the working fingerprint.db (ApplicationOntology\data) on Windows, patches it with game metadata from a bundled or remotely-fetched JSON manifest, relaunches itself elevated when the driver step needs it, and can restore the pristine copy NVIDIA App keeps under NvBackend\DAO.
 
 ## Architecture & Data Flow
 
@@ -13,7 +13,7 @@ games.json (bundled/embedded) ──┐
                                  │
 findFingerprintDB ──► dbPath     │
                                  ▼
-                            patchDB
+                            patchDB ──► fdb, modified
                                  │
                                  ▼
           ParseFingerprintDB ──► applyPatches ──► writePatch
@@ -25,25 +25,37 @@ findFingerprintDB ──► dbPath     │
           FindFingerprint → resolveVersions
           → FindSourceVersion → AddUWPVersion / UpdateVersion
 
+                    ┌─────────── hasDriverWork ─► relaunchElevated (UAC, --elevated)
+                    │
+                    ▼
+ driverRequests ──► nvdr.Apply ──► nvapi_QueryInterface
+   (DriverAppString,         │
+    DriverProfile,            ├─ DRS_CreateSession / LoadSettings
+    DriverProfileCandidates)  ├─ FindProfileByName | FindApplicationByName
+                              ├─ EnumApplications (already-present check)
+                              └─ CreateApplication + SaveSettings
+
 findDAOFingerprintDB ──┐  (--restore)
                        ▼
       getFingerprintDBPath ──► restoreDB ──► CopyFile → working fingerprint.db
 ```
 
-Four-layer architecture:
-1. **CLI layer** (`main.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--version`), orchestration
+Five-layer architecture:
+1. **CLI layer** (`main.go`, `elevation_*.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--no-driver`, `--elevated`, `--version`), orchestration, UAC relaunch
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching, file copy
-4. **Network layer** (`internal/update`): Remote games.json fetch
+4. **Driver layer** (`internal/nvdr`): NVAPI DRS binding (Windows) + status/message types (all platforms)
+5. **Network layer** (`internal/update`): Remote games.json fetch
 
 ## Key Directories
 
 | Directory | Purpose |
 |---|---|
-| `.` | Entry point (`main.go`), embedded `games.json`, icon resources (`nvfp.rc`, `nvfp.ico`, `.syso`), Makefile |
+| `.` | Entry point (`main.go`), elevation files, embedded `games.json`, icon resources (`nvfp.rc`, `nvfp.ico`, `.syso`), Makefile |
 | `internal/db/` | Game manifest model, JSON I/O, resolve logic |
 | `internal/nvidia/` | Fingerprint XML parsing/patching, metadata handling |
 | `internal/nvidia/testdata/` | XML fixture files for tests |
+| `internal/nvdr/` | NVIDIA driver profile (DRS) binding: NVAPI loading, profile/application registration, result messages |
 | `internal/update/` | Remote games.json fetcher |
 
 ## Development Commands
@@ -106,6 +118,7 @@ working on Linux.
 - **Game resolution fallback**: Remote → cache → bundled (in that priority). An empty cacheDir disables the cache layer entirely (no read, no write). Cache lives in `%LOCALAPPDATA%\nvidia-uwp-patch` (falls back to `~/.cache/nvidia-uwp-patch` when `LOCALAPPDATA` is unset).
 - **Forced field defaults**: `Distributor`, `UWPPackageFamilyName`, `AppUserModelId` are derived from the appUserModelID; user overrides take priority over these defaults.
 - **JSON handling**: `Game` fields are `[]*Game` and `[]*Version`; the manifest uses `encoding/json/v2` with `json.Deterministic(true)` on save.
+- **Manifest driver fields**: `driver_profile` (exact DRS profile name) and `driver_app` (string to register, defaults to the package family name) are optional and independent of `versions`: a game with `driver_app` but no `app_user_model_id` still produces a driver request. `Game.DriverAppString()` is the single source of truth for what gets registered.
 - **UWP version modes**: `AddUWPVersion` (new version: default removals + forced fields from appUserModelID) vs `UpdateVersion` (existing version: only explicit removals, forced fields preserved).
 - **Version requests**: `versions: ["*"]` means every version the fingerprint already has, plus a new `uwp` when the game has an `app_user_model_id` and lacks one. `"*"` is rejected unless it is the only entry. A requested `uwp` that gets created is never reported as missing. Lookup is `Game.VersionKeys()`, which lowercases and trims the names.
 - **Version ordering**: versions are reported in fingerprint document order, never in set iteration order; per-version results go through `applyVersion`.
@@ -114,22 +127,34 @@ working on Linux.
 - **Embedded resources**: `games.json` embedded via `//go:embed` and used as fallback.
 - **Version banner**: `--version`/`-v` is a plain bool flag handled at the top of `run()`. The banner is assembled in `main.go` from the `version` and `versionDate` constants; bump both on every release. It does **not** use Cobra's `Command.Version`/`SetVersionTemplate`: that path pulls `cobra.tmpl` → `text/template` (+`reflect`) into the binary (~+1.9 MB). Its shape mirrors the author's other CLIs (name, version, date, copyright, GPLv3+ notice, author).
 - **HTTP safeguards**: 10s timeout, 5MB `io.LimitReader`, custom `User-Agent` header.
-- **No sidecar backups**: patching writes the working fingerprint.db in place. Undo is `--restore`, which copies the pristine `NvBackend\DAO\<hash>\fingerprint.db` (first subdirectory containing the file) over the working copy via `nvidia.CopyFile` (overwrites by design). Restore is a purely local operation: it runs before `resolveGames`, so it needs no manifest, cache or network, and it recreates the destination directory when missing. `getFingerprintDBPath` returns the path without requiring the file to exist; `findFingerprintDB` adds the existence check. `--restore` is mutually exclusive with `--list`, `--game` and `--games-json`.
+- **No sidecar backups**: patching writes the working fingerprint.db in place. Undo is `--restore`, which copies the pristine `NvBackend\DAO\<hash>\fingerprint.db` (first subdirectory containing the file) over the working copy via `nvidia.CopyFile` (overwrites by design). Restore is a purely local operation: it runs before `resolveGames`, so it needs no manifest, cache or network, and it recreates the destination directory when missing. `getFingerprintDBPath` returns the path without requiring the file to exist; `findFingerprintDB` adds the existence check. `--restore` is mutually exclusive with `--list`, `--game` and `--games-json`. It restores `fingerprint.db` only: driver-profile entries are additive and are not removed.
+- **Driver profile step**: after `patchDB`, `applyDriverStep` registers every selected game's `DriverAppString()` in its DRS profile through `nvdr.Apply`. `patchDB` therefore returns the parsed `*nvidia.FingerprintDB` so the driver step derives candidates without reading the file twice. Failures here are warnings to stderr, never errors: a successful fingerprint.db patch must not be masked. `nvdr` never imports `internal/nvidia` (candidates are plain `[]string`).
+- **Driver profile resolution**: `driver_profile` in the manifest wins; otherwise each `nvidia.DriverProfileCandidates` value (the fingerprint's `<DriverProfile>` executables, deduped case-insensitively) is looked up with `DRS_FindApplicationByName`, retrying lowercased after a miss because the driver stores many names that way. No profile is ever created — an unresolved profile asks the user for `driver_profile` instead of inventing a name.
+- **NVAPI binding** (`internal/nvdr/drs_windows.go`): `//go:build windows`; loads `nvapi64.dll` via `syscall.NewLazyDLL`, resolves function addresses with `nvapi_QueryInterface` IDs (never by name), and calls them through `syscall.SyscallN`. Struct layouts (`applicationV4` 20492 bytes, `profileV1` 4116 bytes) and their version words match NVIDIA's `nvapi.h` for amd64, measured once by hand; the compile-time asserts at the bottom of the file pin the Go structs to those literals, so they catch an edit to the structs but not a change in the header itself. `DRS_CreateApplication` is called with everything zeroed except `version` and `appName`. `drs_other.go` stubs `Apply` so `go test ./...` keeps working on Linux; `result.go` holds the platform-independent `Result`/`Status` types and message formatting so those are testable everywhere.
+- **Driver step idempotence**: the profile's applications are enumerated (`DRS_EnumApplications` in batches of 32, honoring `NVAPI_END_ENUMERATION`) and compared case-insensitively before adding; `DRS_SaveSettings` runs once per batch and only when something was added.
+- **Elevation**: `elevation_windows.go` implements `isElevated` (token query) and `relaunchElevated` (`ShellExecuteExW` with `runas`, `SEE_MASK_NOCLOSEPROCESS`, same args plus `--elevated`, `os.Getwd()` as directory so relative `--games-json` keeps working, waits and returns the child's exit code). `run()` requests elevation only when `!dryRun && !noDriverFlag && !elevatedFlag && !isElevated() && hasDriverWork()`, so the elevated child does all the work and UAC appears once. Declining UAC (`errElevationCancelled`) or any relaunch failure degrades to a warning and the driver step is skipped; `elevation_other.go` provides the non-Windows stubs (`isElevated` true, no relaunch).
+- **Driver string limits**: NVAPI unicode fields hold 2048 UTF-16 units including the NUL (`db.MaxDriverString = 2047`). `LoadFromBytes` rejects `driver_app`, `driver_profile` and `app_user_model_id` over that limit; `nvdr.toUTF16` fails instead of truncating and writes the NUL terminator itself, so its destination needs no prior zeroing and can be reused across calls.
 
 ## Important Files
 
 | File | Role |
 |---|---|
-| `main.go` | CLI entry point, Cobra setup, orchestration functions |
+| `main.go` | CLI entry point, Cobra setup, orchestration functions, driver step |
+| `elevation_windows.go` | `isElevated`, `relaunchElevated` (ShellExecuteExW/runas) for Windows |
+| `elevation_other.go` | Non-Windows stubs for the elevation helpers |
 | `games.json` | Bundled game manifest (embedded at build time) |
 | `nvfp.rc` | Windows resource script declaring the application icon |
 | `nvfp.ico` | Multi-resolution application icon (7 sizes, 32–256px) |
 | `nvfp.svg` | SVG source of the icon (green/turquoise circle with the NVIDIA eye) |
 | `nvfp_res_windows_amd64.syso` | Compiled resources linked into the `.exe`; regenerate with `make resources` |
 | `LICENSE` | GPLv3 full text |
-| `internal/db/games.go` | `GameDB`, `Game`, `PackageFamilyName`, `ResolveGames`, `LoadFromBytes`, `LoadFromPath`, `SaveToPath` |
-| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `CopyFile`, `FindFingerprint`, `FindSourceVersion`, `AddUWPVersion`, `UpdateVersion` |
+| `internal/db/games.go` | `GameDB`, `Game`, `PackageFamilyName`, `DriverAppString`, `MaxDriverString`, `ResolveGames`, `LoadFromBytes`, `LoadFromPath`, `SaveToPath` |
+| `internal/nvidia/fingerprint.go` | `FingerprintDB`, `Fingerprint`, `Version`, `XmlElement`, `ParseFingerprintDB`, `WriteFingerprintDB`, `CopyFile`, `FindFingerprint`, `FindSourceVersion`, `DriverProfileCandidates`, `AddUWPVersion`, `UpdateVersion` |
 | `internal/nvidia/patch.go` | `PatchGame`, `PatchResult`, `PatchStatus`, `resolveVersions`, `applyVersion`, `summarize` |
+| `internal/nvdr/result.go` | `Request`, `Result`, `Status`, message formatting (compiles everywhere) |
+| `internal/nvdr/drs_windows.go` | NVAPI DRS binding: `openAPI`, `Apply`, `resolveProfile` |
+| `internal/nvdr/text.go` | `toUTF16`, `fromUTF16`, `cString` (compiles everywhere, so they are testable on any platform) |
+| `internal/nvdr/drs_other.go` | `Apply` stub for non-Windows builds |
 | `internal/update/updater.go` | `GamesURL`, `FetchGamesJSON` |
 | `internal/nvidia/testdata/fingerprint.db` | Primary XML fixture (5 fingerprints) |
 | `internal/nvidia/testdata/fingerprint_metadata.db` | Fixture with Fingerprint-level metadata (2 fingerprints) |
@@ -157,6 +182,7 @@ working on Linux.
 - `output_test.go` validates patch output content (forced fields present, removed fields absent)
 - `updater_test.go` uses `httptest` for FetchGamesJSON error/success scenarios
 - When adding new patch behavior, add corresponding test cases to `fingerprint_test.go` and verify with a round-trip parse/write/re-parse
+- The NVAPI binding itself cannot run on Linux (Windows only), so `internal/nvdr/result.go` keeps the message formatting and status handling testable everywhere via `result_test.go`, and `internal/nvdr/text.go` holds the UTF-16/cString helpers with no build tag so `text_test.go` covers them on every platform; the Windows-only `drs_windows.go` is covered by `GOOS=windows go build`/`go vet`, and its struct layout by the compile-time size/offset asserts in the same file.
 
 ## License
 

@@ -181,7 +181,7 @@ Defines which games to patch and how. The program downloads it automatically fro
 | `fingerprint` | string | Exact entry name in `fingerprint.db` (lowercase, underscores) |
 | `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
 | `driver_profile` | string | Exact profile name in the NVIDIA driver database. Omit to resolve the profile automatically from the fingerprint's `<DriverProfile>` executables |
-| `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id` |
+| `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id`. Set it to the game's `.exe` when the game launches as a plain executable — see [`app_user_model_id` vs `driver_app`](#app_user_model_id-vs-driver_app-why-both-exist) |
 | `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
 | `overrides` | map | XML fields to overwrite or add in the version |
 | `remove` | []string | XML fields to delete from the version |
@@ -286,6 +286,55 @@ No profile is ever **created**: when no candidate matches, the game is reported 
 
 The step is idempotent: running the tool again reports `⊘ already in driver profile` and writes nothing. It requires administrator privileges, hence the UAC prompt.
 
+### `app_user_model_id` vs `driver_app`: why both exist
+
+This trips people up, so it is worth stating plainly: **a driver profile matches by the name of the process that starts, and nothing else.** `NVDRS_APPLICATION.appName` is documented as "String name of the Application" — the driver compares it against the process image name at launch. There is no notion of package identity in the match.
+
+That matters because the same packaged game can start in one of two ways, and each exposes a different process name:
+
+| How the game runs | Name the driver sees | What to register |
+|---|---|---|
+| Hosted Store app (`ApplicationFrameHost`/`WWAHost` keeps the package identity) | the **package family name** | the default: omit `driver_app` |
+| Plain executable, even if bought in the Store | the **`.exe`** name | set `driver_app` to that `.exe` |
+
+So the default (package family name, derived from `app_user_model_id`) is right for genuinely hosted apps, and wrong for games that ship as classic executables. Two entries of the same saga can land on opposite sides:
+
+```json
+{ "fingerprint": "final_fantasy_vii_remake",
+  "app_user_model_id": "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+  "versions": ["uwp"] }
+
+{ "fingerprint": "final_fantasy_vii_rebirth",
+  "app_user_model_id": "39EA002F.EXED2_n746a19ndrrjg!AppFINALFANTASYVIIREBIRTHShipping",
+  "driver_app": "ff7rebirth.exe",
+  "versions": ["*"] }
+```
+
+Remake applies its profile with the package family name; Rebirth only applies it with `ff7rebirth.exe`, and silently does nothing with the UWP ID. Both are correct — the games just launch differently. `app_user_model_id` is still needed on both: it is what patches `fingerprint.db` for NVIDIA App.
+
+There is no way to tell from the manifest which case a game is, so it has to be checked at runtime (see below). The `isMetro` flag in `NVDRS_APPLICATION_V4`, which sounds like it should declare "this is a Store app", is **ignored by the driver**: it reads back as 0 whatever you pass. That is why `nvfp` leaves it at 0 and why the string is the only lever available.
+
+### Checking which name a game actually needs
+
+The reliable way is to look at the running process while the game is at its main menu, from an **unprivileged** PowerShell:
+
+```powershell
+# Every process whose name or package identity mentions the game.
+Get-Process | Where-Object { $_.Path -like '*ff7rebirth*' -or $_.Name -like '*ff7*' } |
+    Select-Object Id, Name, Path, @{n='Package';e={(Get-AppxPackage -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstallLocation -and $_.InstallLocation -like "*$($_.Name)*" }).PackageFamilyName}}
+
+# Simpler and usually enough: what the driver will compare against is just Name.
+Get-Process | Where-Object Name -like 'ff7*' | Format-Table Id, Name, Path -Auto
+```
+
+Read the `Name` column:
+
+- It is the game's `.exe` (`ff7rebirth.exe`) → register that with `driver_app`.
+- It is an app host (`ApplicationFrameHost`, `WWAHost`, `GameBar`) → the game is hosted and the **package family name** is the right string; leave `driver_app` unset.
+
+You can confirm what the driver sees by listing the profile's registered strings with NvidiaProfileInspectorRevamped: the entry that makes the profile apply is exactly the one matching that process name. If the profile contains the package family name but the game launches as an `.exe`, the profile will be there and still not apply — which is the whole symptom.
+
 ### When the profile cannot be resolved
 
 ```
@@ -355,6 +404,35 @@ make resources   # requires x86_64-w64-mingw32-windres (apt: binutils-mingw-w64-
 `make build` aborts with a clear message if the `.syso` is missing, so an
 icon-less binary is never produced by accident.
 
+### NVAPI binding
+
+The driver-profile step talks to NVAPI through hard-coded function IDs, status
+codes and struct layouts, so those values have to match NVIDIA's headers exactly.
+They are **not written by hand**: `internal/nvdr/nvapi_gen.go` is generated by
+`tools/nvapi-gen` from the [NVIDIA/nvapi](https://github.com/NVIDIA/nvapi)
+headers at the commit pinned by `NVAPI_COMMIT` in the `Makefile`.
+
+Every struct size, field offset and version word is verified by compiling and
+running a small C probe against the struct text extracted from `nvapi.h`. The
+measured numbers are pinned a second time in `internal/nvdr/nvapi_layout.go`
+(compile-time asserts against the Go structs), and
+`internal/nvdr/nvapi_provenance.md` records the commit plus the SHA-256 of each
+header used.
+
+The generated file is committed, so `make build`, `go test ./...` and `go vet`
+need neither network access nor a C compiler. To move to a newer header version:
+
+```bash
+make nvapi-latest                        # print the newest upstream commit
+make update-nvapi NVAPI_COMMIT=<sha>     # needs network and cc
+git diff                                 # review, then commit
+```
+
+Regenerating against an unchanged commit is byte-identical and prints
+`unchanged: all values match`. If NVIDIA moved something, the new value appears
+in the `git diff` and `internal/nvdr/nvapi_pinned_test.go` fails until it is
+reviewed and pinned deliberately.
+
 ### Reproducible builds
 
 The build is fully reproducible: the same source code always produces the same binary, regardless of the machine, OS, or filesystem layout. This is achieved with:
@@ -364,6 +442,7 @@ The build is fully reproducible: the same source code always produces the same b
 - `-ldflags="-s -w -buildid="` — strips debug info and build ID
 - `CGO_ENABLED=0` — pure Go, no host C toolchain dependency
 - `windres` writes no timestamps for icon resources, so the committed `.syso` — and therefore the `.exe` — is reproducible too
+- the generated NVAPI binding is committed, so `make build` never reaches the network or the C compiler used to measure the layout
 
 Two people building the same commit on different machines will get bit-for-bit identical binaries.
 

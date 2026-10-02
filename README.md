@@ -71,6 +71,14 @@ Driver profiles:
 
 `(auto)` means the profile is resolved from the fingerprint's `<DriverProfile>` executables at run time; nothing is consulted in dry-run mode.
 
+### Diagnose the driver profiles
+
+```powershell
+.\nvfp.exe --doctor
+```
+
+Read-only and privilege-free: it asks the driver how each game's profile would resolve and prints every candidate it tried with the driver's own answer, then exits without writing anything. Use it whenever the driver step seems to do nothing — see [Diagnosing profile resolution](#diagnosing-profile-resolution-without-writing-anything).
+
 ### Skip the driver step
 
 ```powershell
@@ -335,6 +343,33 @@ Read the `Name` column:
 
 You can confirm what the driver sees by listing the profile's registered strings with NvidiaProfileInspectorRevamped: the entry that makes the profile apply is exactly the one matching that process name. If the profile contains the package family name but the game launches as an `.exe`, the profile will be there and still not apply — which is the whole symptom.
 
+### Diagnosing profile resolution without writing anything
+
+`--doctor` reports exactly what the driver answers for every candidate, and **never writes and never asks for elevation**:
+
+```
+> nvfp.exe --doctor
+
+Driver profile resolution (read-only, nothing is written):
+
+final_fantasy_vii_rebirth
+  application string : ff7rebirth.exe
+  candidates         :
+      ✓ end/binaries/win64/ff7rebirth_.exe          matched profile "FINAL FANTASY VII REBIRTH"
+```
+
+When nothing matches, every attempt is listed with the driver's own status, so the fix is visible instead of guessed:
+
+```
+      ✗ End\Binaries\Win64\ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
+      ✗ end\binaries\win64\ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
+      ✗ end/binaries/win64/ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
+      ✗ ff7rebirth_.exe                             NVAPI_EXECUTABLE_NOT_FOUND
+  => unresolved: set "driver_profile" in games.json with the exact name from NVIDIA Control Panel
+```
+
+Use it first whenever the driver step appears to do nothing: it needs no privileges and produces output in the current console, so nothing can be missed.
+
 ### When the profile cannot be resolved
 
 ```
@@ -359,7 +394,21 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 The program checks its own token before touching anything. Unelevated, and with driver work pending, it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written.
 
+The elevated child runs in its own console window, which Windows closes the moment the process exits. Because the work takes milliseconds, that window used to flash by unread. The child now holds it open with a `Press Enter to close this window...` prompt when its output is a real console; when the output is piped or redirected there is no window to lose, so no pause is added and scripts keep working.
+
 If you decline the prompt, or the relaunch fails, the driver step is skipped with an explicit warning and `fingerprint.db` is still patched (exit code 0).
+
+### Why automatic resolution can miss
+
+The fingerprint and the driver store paths differently. `fingerprint.db` routinely writes `<DriverProfile>` with Windows separators —
+
+```
+<DriverProfile>End\Binaries\Win64\ff7rebirth_.exe</DriverProfile>
+```
+
+— while the driver database holds the same entry with forward slashes (`end/binaries/win64/ff7rebirth_.exe`). A lookup that only tried the literal string, then its lowercase form, therefore failed even though the profile existed with the right executable in it.
+
+Each candidate is now tried in four spellings — as written, forward-slashed, and each of those lowercased — plus the bare file name, because some entries are registered without their directory. This is why the failure looked like "the driver step does nothing": the lookup missed, the game was reported unresolved, and nothing was ever written. Use `--doctor` above to see the outcome for every spelling.
 
 ## Manifest resolution
 

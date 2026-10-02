@@ -2,7 +2,10 @@
 
 package main
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 // errElevationCancelled reports that the user dismissed the UAC prompt; off
 // Windows there is never a prompt to answer.
@@ -16,3 +19,16 @@ func isElevated() bool { return true }
 func relaunchElevated() (int, error) {
 	return 0, errors.New("elevation is only supported on Windows")
 }
+
+// stdoutIsPiped reports whether the output is redirected; off Windows there is
+// no console window to hold open, so the pause is a no-op anyway.
+func stdoutIsPiped() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice == 0
+}
+
+// pauseBeforeExit is a no-op off Windows.
+func pauseBeforeExit() {}

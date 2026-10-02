@@ -143,3 +143,20 @@ func quoteArgs(args []string) string {
 	}
 	return strings.Join(quoted, " ")
 }
+
+// stdoutIsPiped reports whether the output is redirected, in which case a
+// pause would block a script rather than let a human read the window.
+func stdoutIsPiped() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice == 0
+}
+
+// pauseBeforeExit keeps the elevated child's console window open until the user
+// presses Enter, so a run that finishes in milliseconds can actually be read.
+func pauseBeforeExit() {
+	fmt.Fprint(os.Stderr, "\nPress Enter to close this window...")
+	fmt.Scanln()
+}

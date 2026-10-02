@@ -147,8 +147,12 @@ func CopyFile(src, dst string) error {
 	return nil
 }
 
-// FindFingerprint finds a fingerprint by exact name.
+// FindFingerprint finds a fingerprint by exact name. A nil database (for
+// instance when fingerprint.db could not be located) yields no match.
 func FindFingerprint(db *FingerprintDB, name string) *Fingerprint {
+	if db == nil {
+		return nil
+	}
 	for i := range db.Fingerprints {
 		if db.Fingerprints[i].Name == name {
 			return &db.Fingerprints[i]

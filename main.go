@@ -18,9 +18,9 @@ import (
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.0"
+	version = "1.3.0-rc.2"
 	// versionDate is the release date shown by --version.
-	versionDate = "2026 Oct 1"
+	versionDate = "2026 Oct 2"
 )
 
 // versionMessage is the banner printed by --version. It mirrors the version
@@ -43,6 +43,7 @@ var (
 	versionFlag   bool
 	noDriverFlag  bool
 	elevatedFlag  bool
+	doctorFlag    bool
 	gameFilter    string
 	gamesJSONPath string
 )
@@ -66,9 +67,12 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&noDriverFlag, "no-driver", false, "Skip patching NVIDIA driver profiles")
 	rootCmd.Flags().BoolVar(&elevatedFlag, "elevated", false, "Internal: set after the UAC relaunch")
 	rootCmd.Flags().MarkHidden("elevated")
+	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
+	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
+	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
 
 	return rootCmd
 }
@@ -99,6 +103,11 @@ func run(cmd *cobra.Command, args []string) error {
 		listGames(gameDB)
 		return nil
 	}
+	// Doctor reads the driver database, never writes: no elevation, no window
+	// that closes before the output can be read.
+	if doctorFlag {
+		return doctor(gameDB)
+	}
 
 	// The elevated relaunch does all the work, driver step included: never ask
 	// for UAC twice.
@@ -113,6 +122,13 @@ func run(cmd *cobra.Command, args []string) error {
 		default:
 			fmt.Fprintf(os.Stderr, "Warning: could not request administrator privileges: %v\n", err)
 		}
+	}
+	// The elevated child gets its own console, and Windows closes it the
+	// instant the process exits: the whole run would flash by unread. Hold it
+	// open long enough to read the result, but never when the output is being
+	// piped (then there is no window to lose and a pause would hang a script).
+	if elevatedFlag && hasDriverWork(gameDB) && !stdoutIsPiped() {
+		defer pauseBeforeExit()
 	}
 
 	dbPath, err := findFingerprintDB()
@@ -394,6 +410,68 @@ func applyDriverStep(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) error {
 		return nil
 	}
 	printDriverResults(results)
+	return nil
+}
+
+// doctor reports how every request's profile would resolve, without writing
+// anything and without requesting elevation. It exists because the elevated
+// child's window closes as soon as the work is done, which makes a failing
+// resolution impossible to diagnose from the console.
+func doctor(gameDB *db.GameDB) error {
+	dbPath, err := findFingerprintDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fingerprint.db not found, showing manifest candidates only: %v\n", err)
+	}
+	var fdb *nvidia.FingerprintDB
+	if dbPath != "" {
+		if parsed, err := nvidia.ParseFingerprintDB(dbPath); err == nil {
+			fdb = parsed
+		}
+	}
+	reqs := driverRequests(gameDB, fdb)
+	if len(reqs) == 0 {
+		fmt.Println("Nothing to do: no selected game carries a driver application string.")
+		return nil
+	}
+
+	report, err := nvdr.Diagnose(reqs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not read the driver profiles: %v\n", err)
+		fmt.Println("Candidate resolution can only be checked on Windows, where the driver database lives.")
+		return nil
+	}
+	fmt.Println("Driver profile resolution (read-only, nothing is written):")
+	for i, req := range reqs {
+		fmt.Printf("\n%s\n", req.Fingerprint)
+		fmt.Printf("  application string : %s\n", req.App)
+		if req.Profile != "" {
+			fmt.Printf("  pinned profile     : %s\n", req.Profile)
+		}
+		if len(req.Candidates) == 0 {
+			fmt.Println("  candidates         : none (fingerprint not found, or it has no <DriverProfile>)")
+			if req.Profile == "" {
+				fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
+			}
+			continue
+		}
+		fmt.Println("  candidates         :")
+		for _, attempt := range report[i] {
+			mark := "✗"
+			detail := nvdr.StatusName(attempt.Status)
+			if attempt.Status == 0 {
+				mark = "✓"
+				detail = fmt.Sprintf("matched profile %q", attempt.Profile)
+			}
+			fmt.Printf("      %s %-48s %s\n", mark, attempt.Attempt, detail)
+		}
+		matched := false
+		for _, attempt := range report[i] {
+			matched = matched || attempt.Status == 0
+		}
+		if !matched {
+			fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
+		}
+	}
 	return nil
 }
 

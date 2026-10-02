@@ -1,6 +1,3 @@
-// Package nvdr registers UWP package family names in the NVIDIA driver's
-// profile database (DRS) through NVAPI, so the driver recognizes and applies
-// profiles to games that are launched as Microsoft Store apps.
 package nvdr
 
 import (
@@ -20,6 +17,27 @@ const (
 	StatusFailed            Status = "failed"
 )
 
+// statusNames maps the NvAPI_Status codes this package handles to their header
+// names, so a diagnostic can report something readable instead of a raw number.
+var statusNames = map[int32]string{
+	0:    "NVAPI_OK",
+	-5:   "NVAPI_INVALID_ARGUMENT",
+	-7:   "NVAPI_END_ENUMERATION",
+	-137: "NVAPI_INVALID_USER_PRIVILEGE",
+	-163: "NVAPI_PROFILE_NOT_FOUND",
+	-166: "NVAPI_EXECUTABLE_NOT_FOUND",
+	-167: "NVAPI_EXECUTABLE_ALREADY_IN_USE",
+	-175: "NVAPI_ACCESS_DENIED",
+}
+
+// StatusName renders a raw NVAPI status for a diagnostic message.
+func StatusName(status int32) string {
+	if name, ok := statusNames[status]; ok {
+		return name
+	}
+	return fmt.Sprintf("NvAPI status %d", status)
+}
+
 // Request is one game's driver-profile work.
 type Request struct {
 	Fingerprint string   // for messages only
@@ -35,6 +53,15 @@ type Result struct {
 	Profile     string
 	App         string
 	Message     string
+}
+
+// LookupAttempt reports how one candidate string fared when looking for the
+// profile that owns it. It exists so the user can see what the driver answers
+// without an elevated relaunch, which is otherwise invisible.
+type LookupAttempt struct {
+	Attempt string // the exact string handed to FindApplicationByName
+	Status  int32  // the NVAPI status it returned
+	Profile string // the profile it resolved to, when it matched
 }
 
 // Patched reports whether the request added the application string.

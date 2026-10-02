@@ -4,6 +4,7 @@ package nvdr
 
 import (
 	"fmt"
+
 	"runtime"
 	"strings"
 	"syscall"
@@ -199,6 +200,44 @@ func (a *api) findProfileByName(session uintptr, name string) (uintptr, int32) {
 	return handle, int32(r)
 }
 
+// Diagnose resolves every request the way Apply would, but only reports what it
+// found: it never writes and never needs a session that can save. The result is
+// one slice of attempts per candidate, in the order they were tried.
+func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
+	a, err := openAPI()
+	if err != nil {
+		return nil, err
+	}
+	session, status := a.createSession()
+	if status != statusOK {
+		return nil, fmt.Errorf("NvAPI_DRS_CreateSession failed: %s", a.errorDetail(status))
+	}
+	defer a.destroySession(session)
+	if status := a.loadSettings(session); status != statusOK {
+		return nil, fmt.Errorf("NvAPI_DRS_LoadSettings failed: %s", a.errorDetail(status))
+	}
+
+	report := make([][]LookupAttempt, 0, len(reqs))
+	for _, req := range reqs {
+		var attempts []LookupAttempt
+		for _, candidate := range req.Candidates {
+			for _, attempt := range profileLookupAttempts(candidate) {
+				entry := LookupAttempt{Attempt: attempt}
+				handle, stat := a.findApplicationByName(session, attempt)
+				entry.Status = stat
+				if stat == statusOK {
+					if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
+						entry.Profile = fromUTF16(info.profileName[:])
+					}
+				}
+				attempts = append(attempts, entry)
+			}
+		}
+		report = append(report, attempts)
+	}
+	return report, nil
+}
+
 // findApplicationByName looks the application up and returns the profile handle
 // the driver associates with it. The 20492-byte application struct is in/out:
 // it must carry a valid version word or the driver rejects it.
@@ -387,18 +426,17 @@ func resolveProfile(a *api, session uintptr, req Request) (uintptr, string, Resu
 		}
 	}
 	for _, candidate := range req.Candidates {
-		handle, status := a.findApplicationByName(session, candidate)
-		if status == statusExecutableNotFound {
-			handle, status = a.findApplicationByName(session, strings.ToLower(candidate))
+		for _, attempt := range profileLookupAttempts(candidate) {
+			handle, status := a.findApplicationByName(session, attempt)
+			if status != statusOK {
+				continue
+			}
+			info, infoStatus := a.getProfileInfo(session, handle)
+			if infoStatus != statusOK {
+				return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
+			}
+			return handle, fromUTF16(info.profileName[:]), Result{}, true
 		}
-		if status != statusOK {
-			continue
-		}
-		info, infoStatus := a.getProfileInfo(session, handle)
-		if infoStatus != statusOK {
-			return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
-		}
-		return handle, fromUTF16(info.profileName[:]), Result{}, true
 	}
 	return 0, "", newResult(StatusProfileUnresolved, req, ""), false
 }

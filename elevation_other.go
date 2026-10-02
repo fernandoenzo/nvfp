@@ -13,7 +13,7 @@ var errElevationCancelled = errors.New("elevation cancelled")
 
 // isElevated always reports true off Windows: there is no UAC to satisfy and
 // the driver-profile step is skipped on other platforms anyway.
-func isElevated() bool { return true }
+func isElevated() (bool, error) { return true, nil }
 
 // relaunchElevated is only implemented on Windows.
 func relaunchElevated() (int, error) {

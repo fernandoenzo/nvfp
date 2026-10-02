@@ -18,7 +18,7 @@ import (
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.0-rc.2"
+	version = "1.3.0-rc.3"
 	// versionDate is the release date shown by --version.
 	versionDate = "2026 Oct 2"
 )
@@ -111,7 +111,11 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// The elevated relaunch does all the work, driver step included: never ask
 	// for UAC twice.
-	if !dryRun && !noDriverFlag && !elevatedFlag && !isElevated() && hasDriverWork(gameDB) {
+	elevated, err := isElevated()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read the process elevation: %v\n", err)
+	}
+	if !dryRun && !noDriverFlag && !elevatedFlag && !elevated && hasDriverWork(gameDB) {
 		fmt.Fprintln(os.Stderr, "Administrator privileges required: relaunching elevated (accept the UAC prompt)")
 		code, err := relaunchElevated()
 		switch {
@@ -400,7 +404,12 @@ func applyDriverStep(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) error {
 		printDriverPlan(reqs)
 		return nil
 	}
-	if !isElevated() {
+	elevated, err := isElevated()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: driver profiles skipped: %v\n", err)
+		return nil
+	}
+	if !elevated {
 		fmt.Fprintln(os.Stderr, "Warning: driver profiles skipped: administrator privileges required (run as administrator)")
 		return nil
 	}

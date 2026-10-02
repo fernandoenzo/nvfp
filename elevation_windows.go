@@ -15,19 +15,31 @@ import (
 var errElevationCancelled = errors.New("elevation cancelled")
 
 // isElevated reports whether the current process runs with an elevated token.
-// Writing the driver profile database requires administrator privileges.
-func isElevated() bool {
+// Writing the driver profile database requires administrator privileges. It
+// returns an error rather than a silent false, so a broken token query can
+// never again masquerade as "you are not an administrator".
+func isElevated() (bool, error) {
 	token, err := syscall.OpenCurrentProcessToken()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("opening the process token: %w", err)
 	}
 	defer token.Close()
-	var elevated uint32
+	// GetTokenInformation requires a valid ReturnLength pointer: passing NULL
+	// fails with ERROR_INVALID_PARAMETER, which silently reported every
+	// process as unelevated — including the elevated child, so the driver step
+	// was always skipped as "administrator privileges required". This mirrors
+	// x/sys/windows.Token.IsElevated, which is the reference implementation.
+	var info struct{ tokenIsElevated uint32 }
+	var returned uint32
 	if err := syscall.GetTokenInformation(token, uint32(syscall.TokenElevation),
-		(*byte)(unsafe.Pointer(&elevated)), 4, nil); err != nil {
-		return false
+		(*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &returned); err != nil {
+		return false, fmt.Errorf("reading TokenElevation: %w", err)
 	}
-	return elevated != 0
+	if returned != uint32(unsafe.Sizeof(info)) {
+		return false, fmt.Errorf("reading TokenElevation: got %d bytes, want %d",
+			returned, unsafe.Sizeof(info))
+	}
+	return info.tokenIsElevated != 0, nil
 }
 
 // shellExecuteInfoW mirrors SHELLEXECUTEINFOW (112 bytes on amd64), verified

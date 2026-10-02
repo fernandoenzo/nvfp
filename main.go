@@ -18,7 +18,7 @@ import (
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.0-rc.4"
+	version = "1.3.0-rc.5"
 	// versionDate is the release date shown by --version.
 	versionDate = "2026 Oct 2"
 )
@@ -521,7 +521,9 @@ func listGames(gameDB *db.GameDB) {
 		fmt.Printf("  %s\n", game.Fingerprint)
 		fmt.Printf("    AppUserModelId: %s\n", game.AppUserModelID)
 		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
-		if app := game.DriverAppString(); app != "" {
+		if game.SkipDriver {
+			fmt.Println("    SkipDriver: true")
+		} else if app := game.DriverAppString(); app != "" {
 			fmt.Printf("    DriverApp: %s\n", app)
 		}
 		if game.DriverProfile != "" {

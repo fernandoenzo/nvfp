@@ -759,6 +759,7 @@ func TestDriverRequests(t *testing.T) {
 			{Fingerprint: "already_uwp_game", DriverApp: "Override.exe", DriverProfile: "The Profile", Versions: []string{"steam"}},
 			{Fingerprint: "plain_steam_game", Versions: []string{"steam"}},
 			{Fingerprint: "missing_from_fingerprint_db", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
+			{Fingerprint: "skipped_driver_game", AppUserModelID: "Pkg_skip!App", SkipDriver: true, Versions: []string{"uwp"}},
 		},
 	}
 
@@ -797,6 +798,16 @@ func TestDriverRequests(t *testing.T) {
 	// A game whose fingerprint is absent has no candidates to try.
 	if reqs[2].Fingerprint != "missing_from_fingerprint_db" || len(reqs[2].Candidates) != 0 {
 		t.Errorf("reqs[2] = %+v, want no candidates", reqs[2])
+	}
+
+	// skip_driver keeps a game out of the batch even when it has a UWP identity.
+	for _, req := range reqs {
+		if req.Fingerprint == "skipped_driver_game" {
+			t.Errorf("skip_driver game is still in the batch: %+v", req)
+		}
+	}
+	if hasDriverWork(&db.GameDB{Version: 1, Games: []*db.Game{gameDB.Games[4]}}) {
+		t.Error("hasDriverWork() is true for a skip_driver game alone")
 	}
 
 	// The --game filter narrows the request list as well.

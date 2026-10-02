@@ -26,6 +26,7 @@ type Game struct {
 	AppUserModelID string            `json:"app_user_model_id"`
 	DriverProfile  string            `json:"driver_profile,omitempty"`
 	DriverApp      string            `json:"driver_app,omitempty"`
+	SkipDriver     bool              `json:"skip_driver,omitempty"`
 	Versions       []string          `json:"versions"`
 	Overrides      map[string]string `json:"overrides,omitempty"`
 	Remove         []string          `json:"remove,omitempty"`
@@ -57,8 +58,13 @@ func (g Game) UWPPackageFamilyName() string {
 
 // DriverAppString returns the string registered in the driver profile: DriverApp
 // when set, otherwise the package family name derived from AppUserModelID.
-// Empty when the game has no UWP identity and no explicit override.
+// Empty when the game has no UWP identity and no explicit override, or when
+// SkipDriver is set — the manifest's way to opt a game out of the driver step
+// entirely without having to omit its app_user_model_id.
 func (g Game) DriverAppString() string {
+	if g.SkipDriver {
+		return ""
+	}
 	if g.DriverApp != "" {
 		return g.DriverApp
 	}

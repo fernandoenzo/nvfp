@@ -190,6 +190,7 @@ Defines which games to patch and how. The program downloads it automatically fro
 | `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
 | `driver_profile` | string | Exact profile name in the NVIDIA driver database. Omit to resolve the profile automatically from the fingerprint's `<DriverProfile>` executables |
 | `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id`. Set it to the game's `.exe` when the game launches as a plain executable — see [`app_user_model_id` vs `driver_app`](#app_user_model_id-vs-driver_app-why-both-exist) |
+| `skip_driver` | bool | Leave the driver database untouched for this game. The `fingerprint.db` patch still runs; `driver_app` and `driver_profile` are ignored |
 | `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
 | `overrides` | map | XML fields to overwrite or add in the version |
 | `remove` | []string | XML fields to delete from the version |
@@ -246,6 +247,23 @@ This:
 ```
 
 This registers `Custom.exe` in the driver profile named `Some Game` instead of the package family name derived from `app_user_model_id`. Both fields are optional; see [Driver profiles](#driver-profiles).
+
+### Example with the driver step disabled for one game
+
+Some games already work without touching the driver, so there is no reason to add an entry for them:
+
+```json
+{
+  "fingerprint": "final_fantasy_xvi",
+  "app_user_model_id": "39EA002F.Hermia_n746a19ndrrjg!Game",
+  "skip_driver": true,
+  "versions": ["uwp"]
+}
+```
+
+`fingerprint.db` is still patched — that is what makes NVIDIA App see the game — but the driver profile is left alone. It is the per-game equivalent of `--no-driver`, and it also keeps the game out of the "driver work pending" count, so no UAC prompt is requested on its behalf.
+
+Note: `"driver_app": ""` does **not** do this. An empty value is indistinguishable from an omitted one, so the package family name would be registered instead — the opposite of what you want. Use `skip_driver`.
 
 ### How do I find the `fingerprint` and the `app_user_model_id`?
 

@@ -363,6 +363,20 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 			{
 				"fingerprint": "plain_steam",
 				"versions": ["steam"]
+			},
+			{
+				"fingerprint": "skipped",
+				"app_user_model_id": "Pkg_skip!AppX",
+				"versions": ["uwp"],
+				"skip_driver": true
+			},
+			{
+				"fingerprint": "skipped_with_override",
+				"app_user_model_id": "Pkg_skip2!AppX",
+				"versions": ["uwp"],
+				"driver_app": "Ignored.exe",
+				"driver_profile": "Ignored Profile",
+				"skip_driver": true
 			}
 		]
 	}`)
@@ -381,6 +395,9 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 	if got.Games[1].DriverProfile != "Some Profile" {
 		t.Errorf("driver_profile = %q, want Some Profile", got.Games[1].DriverProfile)
 	}
+	if !got.Games[3].SkipDriver {
+		t.Error("skip_driver did not survive parsing")
+	}
 
 	tests := []struct {
 		name string
@@ -391,6 +408,8 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 		{"explicit override wins", *got.Games[1], "Other.exe"},
 		{"no UWP identity and no override", *got.Games[2], ""},
 		{"override without app id", Game{DriverApp: "Solo.exe"}, "Solo.exe"},
+		{"skip_driver suppresses the derived name", *got.Games[3], ""},
+		{"skip_driver beats an explicit driver_app", *got.Games[4], ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -4,11 +4,12 @@ package nvdr
 
 import (
 	"fmt"
-
 	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // Function IDs from NVIDIA/nvapi's nvapi_interface.h. Each ID is resolved
@@ -96,7 +97,11 @@ var (
 const enumBatch = 32
 
 var (
-	modNVAPI           = syscall.NewLazyDLL("nvapi64.dll")
+	// nvapi64.dll lives in Windows\System32, so the system-only variant is
+	// used: it restricts the search to that directory and removes the DLL
+	// preloading risk the stdlib's NewLazyDLL carries (x/sys documents the
+	// hazard, the stdlib does not).
+	modNVAPI           = windows.NewLazySystemDLL("nvapi64.dll")
 	procQueryInterface = modNVAPI.NewProc("nvapi_QueryInterface")
 )
 
@@ -221,7 +226,7 @@ func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 	for _, req := range reqs {
 		var attempts []LookupAttempt
 		for _, candidate := range req.Candidates {
-			for _, attempt := range profileLookupAttempts(candidate) {
+			for _, attempt := range []string{candidate, strings.ToLower(candidate)} {
 				entry := LookupAttempt{Attempt: attempt}
 				handle, stat := a.findApplicationByName(session, attempt)
 				entry.Status = stat
@@ -426,17 +431,18 @@ func resolveProfile(a *api, session uintptr, req Request) (uintptr, string, Resu
 		}
 	}
 	for _, candidate := range req.Candidates {
-		for _, attempt := range profileLookupAttempts(candidate) {
-			handle, status := a.findApplicationByName(session, attempt)
-			if status != statusOK {
-				continue
-			}
-			info, infoStatus := a.getProfileInfo(session, handle)
-			if infoStatus != statusOK {
-				return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
-			}
-			return handle, fromUTF16(info.profileName[:]), Result{}, true
+		handle, status := a.findApplicationByName(session, candidate)
+		if status == statusExecutableNotFound {
+			handle, status = a.findApplicationByName(session, strings.ToLower(candidate))
 		}
+		if status != statusOK {
+			continue
+		}
+		info, infoStatus := a.getProfileInfo(session, handle)
+		if infoStatus != statusOK {
+			return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
+		}
+		return handle, fromUTF16(info.profileName[:]), Result{}, true
 	}
 	return 0, "", newResult(StatusProfileUnresolved, req, ""), false
 }

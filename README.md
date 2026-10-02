@@ -400,17 +400,15 @@ The elevated child runs in its own console window, which Windows closes the mome
 
 If you decline the prompt, or the relaunch fails, the driver step is skipped with an explicit warning and `fingerprint.db` is still patched (exit code 0).
 
-### Why automatic resolution can miss
+### Why the driver step appeared to do nothing
 
-The fingerprint and the driver store paths differently. `fingerprint.db` routinely writes `<DriverProfile>` with Windows separators —
+Two independent faults, both fixed:
 
-```
-<DriverProfile>End\Binaries\Win64\ff7rebirth_.exe</DriverProfile>
-```
+1. **Resolution worked; the write never ran.** The token query passed a null `ReturnLength` to `GetTokenInformation`, which fails with `ERROR_INVALID_PARAMETER`, so `isElevated()` reported *every* process as unelevated — the elevated child included. The driver step was skipped with *"administrator privileges required"* right after the UAC prompt, which is why the game was reported as `⊘ already has uwp version(s)` and then nothing else happened. See [Elevation](#elevation).
 
-— while the driver database holds the same entry with forward slashes (`end/binaries/win64/ff7rebirth_.exe`). A lookup that only tried the literal string, then its lowercase form, therefore failed even though the profile existed with the right executable in it.
+2. **Profiles written with Windows separators could not be found.** `fingerprint.db` writes `<DriverProfile>End\Binaries\Win64\ff7rebirth_.exe</DriverProfile>` while the driver stores the entry forward-slashed and lowercased. Both the verbatim and the lowercase form are tried, which covers it: run `--doctor` and you will see the verbatim spelling resolve on the first attempt, including these path-style values.
 
-Each candidate is now tried in four spellings — as written, forward-slashed, and each of those lowercased — plus the bare file name, because some entries are registered without their directory. This is why the failure looked like "the driver step does nothing": the lookup missed, the game was reported unresolved, and nothing was ever written. Use `--doctor` above to see the outcome for every spelling.
+`--doctor` needs no privileges, so it reports the truth even when the write path is broken — use it whenever the driver step appears to do nothing.
 
 ## Manifest resolution
 

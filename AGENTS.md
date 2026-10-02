@@ -69,11 +69,6 @@ make build
 # Regenerate the Windows resource object (app icon) from nvfp.rc — needs MinGW
 make resources
 
-# Regenerate the NVAPI binding from the pinned NVIDIA headers — needs network + cc
-make update-nvapi
-# Print the newest upstream commit without regenerating anything
-make nvapi-latest
-
 # Run tests
 make test
 # Equivalent: go test ./...

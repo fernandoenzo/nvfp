@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/nvdr"
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
 )
 
@@ -818,5 +819,19 @@ func TestDriverRequests(t *testing.T) {
 	gameFilter = "final_fantasy_vii_remake"
 	if got := driverRequests(gameDB, fdb); len(got) != 1 || got[0].Fingerprint != "final_fantasy_vii_remake" {
 		t.Errorf("driverRequests() with --game final_fantasy_vii_remake = %+v, want one", got)
+	}
+}
+
+// db.MaxDriverString duplicates nvdr.MaxDriverString on purpose: internal/db
+// validates the manifest without importing internal/nvdr, so the two must be
+// kept in step by hand. nvdr derives its copy from the buffer the binding hands
+// to the driver, which is the one that actually matters.
+func TestDriverStringLimitMatchesNVAPI(t *testing.T) {
+	if db.MaxDriverString != nvdr.MaxDriverString {
+		t.Errorf("db.MaxDriverString = %d, nvdr.MaxDriverString = %d",
+			db.MaxDriverString, nvdr.MaxDriverString)
+	}
+	if nvdr.MaxDriverString != 2047 {
+		t.Errorf("nvdr.MaxDriverString = %d, want 2047 (NVAPI_UNICODE_STRING_MAX - 1)", nvdr.MaxDriverString)
 	}
 }

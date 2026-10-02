@@ -31,6 +31,12 @@ func TestToUTF16(t *testing.T) {
 			want: []uint16{'a', 'b', 'c'},
 		},
 		{
+			name: "2047 units fit in an NVAPI string",
+			size: 2048,
+			in:   strings.Repeat("a", 2047),
+			want: nil, // checked separately: the prefix is too long to list here
+		},
+		{
 			name: "surrogate pair counts as two units",
 			size: 3,
 			in:   "\U0001F600",

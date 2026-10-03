@@ -65,8 +65,13 @@ var (
 	_ [unsafe.Offsetof(shellExecuteInfoW{}.hProcess) - 104]struct{}    = [0]struct{}{}
 )
 
+// shell32.dll lives in Windows\System32, so the system-only variant is used,
+// as in internal/nvdr for nvapi64.dll: it restricts the search to that
+// directory instead of walking the normal search order. shell32.dll happens to
+// sit in the stdlib's internal system-DLL allowlist, but syscall.LoadDLL still
+// points at x/sys as the supported way to load a system DLL.
 var (
-	modShell32          = syscall.NewLazyDLL("shell32.dll")
+	modShell32          = windows.NewLazySystemDLL("shell32.dll")
 	procShellExecuteExW = modShell32.NewProc("ShellExecuteExW")
 )
 
@@ -84,41 +89,48 @@ func relaunchElevated() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("getting the working directory: %w", err)
 	}
-	verb, err := syscall.UTF16PtrFromString("runas")
+	sei, err := elevatedLaunchInfo(exe, dir)
 	if err != nil {
 		return 0, err
 	}
-	file, err := syscall.UTF16PtrFromString(exe)
-	if err != nil {
-		return 0, err
-	}
-	params, err := syscall.UTF16PtrFromString(quoteArgs(append(os.Args[1:], "--elevated")))
-	if err != nil {
-		return 0, err
-	}
-	cwd, err := syscall.UTF16PtrFromString(dir)
-	if err != nil {
-		return 0, err
-	}
+	return runElevated(sei)
+}
 
+// elevatedLaunchInfo builds the request that asks the shell to relaunch exe as
+// an administrator, with the same arguments plus --elevated, from dir.
+func elevatedLaunchInfo(exe, dir string) (*shellExecuteInfoW, error) {
 	const (
 		seeMaskNoCloseProcess = 0x40
 		swShowNormal          = 1
-		errorCancelled        = 1223
 	)
-	sei := shellExecuteInfoW{
-		fMask:        seeMaskNoCloseProcess,
-		lpVerb:       verb,
-		lpFile:       file,
-		lpParameters: params,
-		lpDirectory:  cwd,
-		nShow:        swShowNormal,
+	sei := &shellExecuteInfoW{fMask: seeMaskNoCloseProcess, nShow: swShowNormal}
+	var err error
+	if sei.lpVerb, err = syscall.UTF16PtrFromString("runas"); err != nil {
+		return nil, err
 	}
-	sei.cbSize = uint32(unsafe.Sizeof(sei))
+	if sei.lpFile, err = syscall.UTF16PtrFromString(exe); err != nil {
+		return nil, err
+	}
+	args := quoteArgs(append(os.Args[1:], "--elevated"))
+	if sei.lpParameters, err = syscall.UTF16PtrFromString(args); err != nil {
+		return nil, err
+	}
+	if sei.lpDirectory, err = syscall.UTF16PtrFromString(dir); err != nil {
+		return nil, err
+	}
+	sei.cbSize = uint32(unsafe.Sizeof(*sei))
+	return sei, nil
+}
 
-	ret, _, errno := syscall.SyscallN(procShellExecuteExW.Addr(), uintptr(unsafe.Pointer(&sei)))
+// runElevated hands the request to the shell and waits for the elevated child,
+// returning its exit code. It returns errElevationCancelled when the user
+// declines the prompt.
+func runElevated(sei *shellExecuteInfoW) (int, error) {
+	ret, _, errno := procShellExecuteExW.Call(uintptr(unsafe.Pointer(sei)))
+	// Call returns a plain error built from GetLastError; errors.Is unwraps it
+	// to the windows.Errno the comparison needs.
 	if ret == 0 {
-		if errno == errorCancelled {
+		if errors.Is(errno, windows.ERROR_CANCELLED) {
 			return 0, errElevationCancelled
 		}
 		return 0, fmt.Errorf("ShellExecuteExW failed: %w", errno)

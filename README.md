@@ -410,7 +410,7 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 ### Elevation
 
-The program checks its own token before touching anything. Unelevated, and with driver work pending, it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written.
+The program checks its own token before touching anything. Unelevated, and with driver work pending, it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
 The token query used to pass a null `ReturnLength` to `GetTokenInformation`. That call is documented as requiring a valid pointer there, and it fails with `ERROR_INVALID_PARAMETER` — so **every** process, the elevated child included, reported itself as unelevated and the driver step was skipped with *"administrator privileges required"* even right after accepting the UAC prompt. It now passes a real length and checks the result, mirroring `x/sys/windows.Token.IsElevated`. A failure to read the token is reported as an error instead of being silently read as "not an administrator".
 

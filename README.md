@@ -18,13 +18,13 @@ NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their pla
 
 Fixing `fingerprint.db` alone is not enough. The driver keeps a separate profile database (`%ProgramData%\NVIDIA Corporation\Drs\nvdrsdb0.bin` / `nvdrsdb1.bin`) where every profile lists the executables that activate it. UWP profiles do not contain the package family name, so when the game launches the driver doesn't recognize it and injects nothing (no ReBAR, no DLSS overrides…). Tools like NvidiaProfileInspectorRevamped fix this by hand through NVAPI; this tool does it automatically, in the same pass as the `fingerprint.db` patch.
 
-This tool locates both databases, patches `fingerprint.db` with the missing entries (or updates existing ones), registers the package family name in the matching driver profile through NVAPI, and can restore the pristine `fingerprint.db` afterwards.
+This tool locates both databases, patches `fingerprint.db` with the missing entries (or updates existing ones), registers the package family name in the matching driver profile through NVAPI, can restore the pristine `fingerprint.db` afterwards, and (`--sl-override`) repairs the NGX OTA manifest Streamline plugins are loaded from.
 
 ## Requirements
 
 - Windows 11
 - **NVIDIA App** installed (the modern one, not GeForce Experience)
-- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched.
+- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched. The `--sl-override` repair also needs them, because `ProgramData\NVIDIA` is not writable by a normal user.
 - **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
 ## Usage
@@ -78,6 +78,52 @@ Driver profiles:
 ```
 
 Read-only and privilege-free: it asks the driver how each game's profile would resolve and prints every candidate it tried with the driver's own answer, then exits without writing anything. Use it whenever the driver step seems to do nothing — see [Diagnosing profile resolution](#diagnosing-profile-resolution-without-writing-anything).
+
+### Repair the Streamline OTA manifest
+
+```powershell
+.\nvfp.exe --sl-override
+```
+
+```
+NGX OTA manifest: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt
+  ✓ sl_common_0 payload restored from the sibling bundle
+  ✓ added [sl_common_0]  app_E658703 = 2.14.0
+  ✓ added [sl_common_override_0]  app_E658700 = 2.14.0
+  backup: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt.bak
+```
+
+The NVIDIA App's bootstrap can rewrite `nvngx_config.txt` and leave only the
+bundle sections (`[sl_sdk_0]`, `[sl_sdk_override_0]`, `[dlss]`…), dropping the
+per-feature ones. Streamline's interposer looks plugins up **per feature**, in
+two passes — `[sl_<feat>_override_0]` with `app_E658700` first, `[sl_<feat>_0]`
+with `app_E658703` second — so once those sections are gone both passes fail
+and the game silently falls back to its bundled plugins:
+
+```
+Could not find version matching for plugin: reflex_override_0
+Could not find version matching for plugin: reflex_0
+Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loaded!
+```
+
+`--sl-override` rebuilds them. It reads the authoritative feature list from both
+bundles' own `nvngx_package_config.txt`, restores a payload that exists under
+only one hash from the sibling bundle (identical bytes), and appends the missing
+`[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections. The first write copies the
+manifest to `nvngx_config.txt.bak` and that backup is never overwritten.
+
+It is **idempotent**: run it again and it reports that there is nothing to do
+and writes nothing. It is also purely local: it ignores the games manifest, the
+cache and the network, and cannot be combined with `--list`, `--game`,
+`--games-json`, `--doctor`, `--no-driver` or `--restore`. Combine it with `--dry-run` to see
+what it would change.
+
+The cache directory is `OTACachePath` from
+`HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to
+`C:\ProgramData\NVIDIA\NGX\models`. Features with no payload in either bundle
+(NVIDIA does not publish every plugin) are reported and skipped. Run it **after
+the NVIDIA App has started** — its bootstrap rewrites the manifest — and before
+launching the game; re-run it after every driver or NVIDIA App update.
 
 ### Skip the driver step
 
@@ -292,6 +338,8 @@ For each game with `versions: ["uwp"]`:
 4. Writes the patched database
 5. Registers the UWP string (package family name by default) in the game's driver profile through NVAPI, unless `--no-driver`
 
+With `--sl-override` instead, nothing above runs: it repairs only the NGX OTA manifest, as described in [Repair the Streamline OTA manifest](#repair-the-streamline-ota-manifest).
+
 Nothing is backed up next to it: the NVIDIA App keeps its own pristine copy
 under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
 
@@ -410,7 +458,7 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 ### Elevation
 
-The program checks its own token before touching anything. Unelevated, and with driver work pending, it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
+The program checks its own token before touching anything. Unelevated, and with driver work pending (`--sl-override` requests it too, but only when it actually has something to write), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
 The token query used to pass a null `ReturnLength` to `GetTokenInformation`. That call is documented as requiring a valid pointer there, and it fails with `ERROR_INVALID_PARAMETER` — so **every** process, the elevated child included, reported itself as unelevated and the driver step was skipped with *"administrator privileges required"* even right after accepting the UAC prompt. It now passes a real length and checks the result, mirroring `x/sys/windows.Token.IsElevated`. A failure to read the token is reported as an error instead of being silently read as "not an administrator".
 

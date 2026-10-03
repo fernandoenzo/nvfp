@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/ngx"
 	"github.com/fernandoenzo/nvfp/internal/nvdr"
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
 	"github.com/fernandoenzo/nvfp/internal/update"
@@ -37,15 +38,16 @@ const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
 var bundledGames []byte
 
 var (
-	dryRun        bool
-	listOnly      bool
-	restoreFlag   bool
-	versionFlag   bool
-	noDriverFlag  bool
-	elevatedFlag  bool
-	doctorFlag    bool
-	gameFilter    string
-	gamesJSONPath string
+	dryRun         bool
+	listOnly       bool
+	restoreFlag    bool
+	versionFlag    bool
+	noDriverFlag   bool
+	elevatedFlag   bool
+	doctorFlag     bool
+	slOverrideFlag bool
+	gameFilter     string
+	gamesJSONPath  string
 )
 
 // newRootCmd builds the command tree. It is separate from main so tests can
@@ -68,11 +70,17 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&elevatedFlag, "elevated", false, "Internal: set after the UAC relaunch")
 	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
+	rootCmd.Flags().BoolVar(&slOverrideFlag, "sl-override", false, "Add the missing Streamline per-feature sections to the NGX OTA manifest")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
+	// The NGX repair returns before the manifest is read, so combining it with
+	// any of these would silently ignore the other flag.
+	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
+		rootCmd.MarkFlagsMutuallyExclusive("sl-override", other)
+	}
 
 	return rootCmd
 }
@@ -95,6 +103,16 @@ func run(cmd *cobra.Command, args []string) error {
 	if restoreFlag {
 		return restoreDB()
 	}
+	// The NGX manifest repair is also purely local: it reads the driver
+	// bundles under ProgramData, never the games manifest.
+	if slOverrideFlag {
+		// The elevated child's console closes the instant the process exits:
+		// hold it open when there is a real window to read.
+		if elevatedFlag && !stdoutIsPiped() {
+			defer pauseBeforeExit()
+		}
+		return applySLOverride()
+	}
 	gameDB, err := resolveGames()
 	if err != nil {
 		return fmt.Errorf("loading games database: %w", err)
@@ -111,22 +129,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// The elevated relaunch does all the work, driver step included: never ask
 	// for UAC twice.
-	elevated, err := isElevated()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not read the process elevation: %v\n", err)
-	}
-	if !dryRun && !noDriverFlag && !elevatedFlag && !elevated && hasDriverWork(gameDB) {
-		fmt.Fprintln(os.Stderr, "Administrator privileges required: relaunching elevated (accept the UAC prompt)")
-		code, err := relaunchElevated()
-		switch {
-		case err == nil:
-			os.Exit(code)
-		case errors.Is(err, errElevationCancelled):
-			// Still unelevated: the driver step reports that it was skipped.
-		default:
-			fmt.Fprintf(os.Stderr, "Warning: could not request administrator privileges: %v\n", err)
-		}
-	}
+	ensureElevated(!dryRun && !noDriverFlag && hasDriverWork(gameDB))
 	// The elevated child gets its own console, and Windows closes it the
 	// instant the process exits: the whole run would flash by unread. Hold it
 	// open long enough to read the result, but never when the output is being
@@ -174,6 +177,109 @@ func restoreDB() error {
 	}
 	fmt.Printf("Restored %s\n  from %s\n", dst, src)
 	return nil
+}
+
+// ensureElevated relaunches the program through UAC when wanted is true and
+// the process is not elevated yet. A failure to request elevation is a
+// warning: the caller reports what it had to skip. It never returns when the
+// elevated child succeeds, because that child replaces this process.
+func ensureElevated(wanted bool) {
+	if !wanted || elevatedFlag {
+		return
+	}
+	elevated, err := isElevated()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read the process elevation: %v\n", err)
+	}
+	if elevated {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "Administrator privileges required: relaunching elevated (accept the UAC prompt)")
+	code, err := relaunchElevated()
+	switch {
+	case err == nil:
+		os.Exit(code)
+	case errors.Is(err, errElevationCancelled):
+		// Still unelevated: the caller reports that its step was skipped.
+	default:
+		fmt.Fprintf(os.Stderr, "Warning: could not request administrator privileges: %v\n", err)
+	}
+}
+
+// ngxRoot resolves the NGX OTA cache directory. It is a variable so tests can
+// point the whole --sl-override flow at a fixture directory; production always
+// calls ngx.Root.
+var ngxRoot = ngx.Root
+
+// applySLOverride repairs the NGX OTA manifest: it reports what the Streamline
+// bundles are missing (or, with --dry-run, what it would do) and writes the
+// missing per-feature sections, backing the manifest up first. The repair
+// needs Administrator privileges, so it requests UAC when it has work to do.
+func applySLOverride() error {
+	root, err := ngxRoot()
+	if err != nil {
+		return err
+	}
+	plan, err := ngx.Inspect(root)
+	if err != nil {
+		return err
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
+	}
+	if dryRun {
+		printSLPlan(plan)
+		return nil
+	}
+	ensureElevated(plan.Changed())
+	if err := ngx.Apply(plan); err != nil {
+		return fmt.Errorf("updating the NGX manifest: %w", err)
+	}
+	printSLResult(plan)
+	return nil
+}
+
+// printSLPlan shows what the NGX repair would do, naming the files.
+func printSLPlan(plan *ngx.Plan) {
+	fmt.Printf("NGX OTA cache: %s\n  manifest: %s\n", plan.Root, plan.Manifest)
+	for _, cp := range plan.Copies {
+		fmt.Printf("  → would copy %s\n        to %s\n", cp.Source, cp.Dest)
+	}
+	for _, section := range plan.Pending() {
+		fmt.Printf("  → would add [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
+	}
+	if !plan.Changed() {
+		fmt.Println("  ⊘ nothing to do: the manifest already carries every per-feature section")
+	}
+	warnMissingFeatures(plan)
+}
+
+// printSLResult reports the repair the way the patch steps do: one line per
+// change, using the same symbols.
+func printSLResult(plan *ngx.Plan) {
+	fmt.Printf("NGX OTA manifest: %s\n", plan.Manifest)
+	for _, cp := range plan.Copies {
+		fmt.Printf("  ✓ %s payload restored from the sibling bundle\n", cp.Feature)
+	}
+	if pending := plan.Pending(); len(pending) > 0 {
+		for _, section := range pending {
+			fmt.Printf("  ✓ added [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
+		}
+		fmt.Printf("  backup: %s\n", plan.Backup)
+	} else {
+		fmt.Println("  ⊘ nothing to do: the manifest already carries every per-feature section")
+	}
+	warnMissingFeatures(plan)
+}
+
+// warnMissingFeatures reports the features NVIDIA does not ship at all: no
+// payload means no section can be added.
+func warnMissingFeatures(plan *ngx.Plan) {
+	if len(plan.Missing) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Warning: no payload in either bundle for: %v\n", plan.Missing)
+	fmt.Fprintln(os.Stderr, "These are not in the NGX cache: NVIDIA has not published them, so they are skipped.")
 }
 
 func resolveGames() (*db.GameDB, error) {

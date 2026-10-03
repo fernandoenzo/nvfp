@@ -835,3 +835,148 @@ func TestDriverStringLimitMatchesNVAPI(t *testing.T) {
 		t.Errorf("nvdr.MaxDriverString = %d, want 2047 (NVAPI_UNICODE_STRING_MAX - 1)", nvdr.MaxDriverString)
 	}
 }
+
+// slFixture builds the NGX cache layout the --sl-override flow repairs: two
+// bundles, a manifest holding only the bundle sections, and payloads under the
+// override hash only.
+func slFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"nvngx_config.txt": "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_sdk_override_0]\r\napp_E658700 = 2.14.0",
+		filepath.Join("sl_sdk_0", "versions", "1", "nvngx_package_config.txt"):                  "sl_common_0, 2.14.0, .dll, sl.common.dll\n",
+		filepath.Join("sl_sdk_override_0", "versions", "1", "nvngx_package_config.txt"):         "sl_common_override_0, 2.14.0, .dll, sl.common.dll\n",
+		filepath.Join("sl_common_override_0", "versions", "134656", "files", "1B0_E658700.dll"): "payload bytes",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", path, err)
+		}
+	}
+	return root
+}
+
+func TestSLOverrideFlagSkipsManifestResolution(t *testing.T) {
+	// --sl-override is a pure local file operation: with an invalid
+	// --games-json it still repairs, proving run() never resolves the manifest.
+	root := slFixture(t)
+	oldRoot := ngxRoot
+	oldFlag, oldPath := slOverrideFlag, gamesJSONPath
+	oldDry := dryRun
+	defer func() { ngxRoot, slOverrideFlag, gamesJSONPath, dryRun = oldRoot, oldFlag, oldPath, oldDry }()
+	ngxRoot = func() (string, error) { return root, nil }
+	slOverrideFlag = true
+	gamesJSONPath = filepath.Join(root, "does-not-exist.json")
+	dryRun = false
+
+	if err := run(nil, nil); err != nil {
+		t.Fatalf("run() with --sl-override error: %v", err)
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	for _, want := range []string{"[sl_common_0]", "app_E658703 = 2.14.0", "[sl_common_override_0]", "app_E658700 = 2.14.0"} {
+		if !strings.Contains(string(manifest), want) {
+			t.Errorf("manifest missing %q:\n%s", want, manifest)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
+		t.Errorf("the plain family payload was not filled from the sibling: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); err != nil {
+		t.Errorf("no backup was written: %v", err)
+	}
+}
+
+func TestSLOverrideDryRunWritesNothing(t *testing.T) {
+	root := slFixture(t)
+	oldRoot := ngxRoot
+	oldFlag := slOverrideFlag
+	oldDry := dryRun
+	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
+	ngxRoot = func() (string, error) { return root, nil }
+	slOverrideFlag = true
+	dryRun = true
+
+	before, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	output := captureStdout(t, func() {
+		if err := run(nil, nil); err != nil {
+			t.Fatalf("run() with --sl-override --dry-run error: %v", err)
+		}
+	})
+	after, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("--dry-run modified the manifest")
+	}
+	if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); !os.IsNotExist(err) {
+		t.Errorf("--dry-run wrote a backup: %v", err)
+	}
+	if !strings.Contains(output, "would add [sl_common_0]") {
+		t.Errorf("dry-run output does not describe the pending section:\n%s", output)
+	}
+}
+
+func TestSLOverrideIsIdempotent(t *testing.T) {
+	root := slFixture(t)
+	oldRoot := ngxRoot
+	oldFlag := slOverrideFlag
+	oldDry := dryRun
+	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
+	ngxRoot = func() (string, error) { return root, nil }
+	slOverrideFlag = true
+	dryRun = false
+
+	if err := run(nil, nil); err != nil {
+		t.Fatalf("first run() error: %v", err)
+	}
+	first, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	output := captureStdout(t, func() {
+		if err := run(nil, nil); err != nil {
+			t.Fatalf("second run() error: %v", err)
+		}
+	})
+	second, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("the second run changed the manifest:\n%q\n%q", first, second)
+	}
+	if !strings.Contains(output, "nothing to do") {
+		t.Errorf("the second run did not report that there was nothing to do:\n%s", output)
+	}
+}
+
+// captureStdout runs fn with stdout redirected and returns what it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return buf.String()
+}

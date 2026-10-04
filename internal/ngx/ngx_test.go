@@ -121,24 +121,6 @@ func TestInspectUsesOTAHashPath(t *testing.T) {
 	}
 }
 
-func TestInspectSkipsSectionsAlreadyPresent(t *testing.T) {
-	root := cacheFixture(t,
-		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0",
-		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
-		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
-
-	plan := inspectFixture(t, root)
-	if len(plan.Additions) != 0 || len(plan.Updates) != 0 {
-		t.Errorf("additions = %v, updates = %v, want none", plan.Additions, plan.Updates)
-	}
-	if len(plan.Copies) != 0 {
-		t.Errorf("copies = %v, want none: the payload already exists", plan.Copies)
-	}
-	if plan.Changed() {
-		t.Error("Changed() = true, want false")
-	}
-}
-
 func TestInspectReportsFeatureWithoutPayload(t *testing.T) {
 	root := cacheFixture(t, "",
 		[]bundleSpec{plainSpec("sl_directsr_0, 2.14.0, .dll, sl.directsr.dll\n")}, nil)
@@ -341,28 +323,6 @@ func TestApplyDoesNotOverwriteExistingBackup(t *testing.T) {
 	}
 }
 
-func TestApplySkipsEverythingWhenNothingToDo(t *testing.T) {
-	initial := "[sl_sdk_0]\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0"
-	root := cacheFixture(t, initial,
-		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
-		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
-
-	plan := inspectFixture(t, root)
-	if err := Apply(plan); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if _, err := os.Stat(plan.Backup); !os.IsNotExist(err) {
-		t.Errorf("a backup appeared for an unchanged manifest: %v", err)
-	}
-	manifest, err := os.ReadFile(plan.Manifest)
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	if string(manifest) != initial {
-		t.Errorf("manifest = %q, want it untouched", manifest)
-	}
-}
-
 func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 	for _, line := range []string{
 		"",
@@ -531,15 +491,17 @@ func TestApplyCorrectsStaleVersionKeepingLineStyle(t *testing.T) {
 	}
 }
 
+// The whole cache is already correct: Inspect finds nothing to do and Apply
+// writes nothing — no backup, the manifest comes out byte-identical.
 func TestCurrentVersionIsNotTouched(t *testing.T) {
-	initial := "[sl_common_0]\r\napp_E658703 = 2.14.3\r\n"
+	initial := "[sl_sdk_0]\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0"
 	root := cacheFixture(t, initial,
-		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
-		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
 	plan := inspectFixture(t, root)
-	if len(plan.Updates) != 0 {
-		t.Errorf("updates = %+v, want none", plan.Updates)
+	if len(plan.Additions) != 0 || len(plan.Updates) != 0 || len(plan.Copies) != 0 || len(plan.Missing) != 0 {
+		t.Errorf("plan = %+v, want nothing to do", plan)
 	}
 	if plan.Changed() {
 		t.Error("Changed() = true, want false")
@@ -547,14 +509,14 @@ func TestCurrentVersionIsNotTouched(t *testing.T) {
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
+	if _, err := os.Stat(plan.Backup); !os.IsNotExist(err) {
+		t.Errorf("a backup appeared for an unchanged manifest: %v", err)
+	}
 	manifest, err := os.ReadFile(plan.Manifest)
 	if err != nil {
 		t.Fatalf("reading manifest: %v", err)
 	}
 	if string(manifest) != initial {
 		t.Errorf("manifest = %q, want it untouched", manifest)
-	}
-	if _, err := os.Stat(plan.Backup); !os.IsNotExist(err) {
-		t.Errorf("a backup appeared for an unchanged manifest: %v", err)
 	}
 }

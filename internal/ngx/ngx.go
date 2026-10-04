@@ -35,6 +35,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/fernandoenzo/set"
 )
 
 const (
@@ -246,7 +248,7 @@ func discover(root string) ([]feature, []string) {
 	var (
 		features []feature
 		warnings []string
-		seen     = map[string]bool{}
+		seen     = set.New[string](len(newest))
 	)
 	for _, bundle := range slices.Sorted(maps.Keys(newest)) {
 		path := newest[bundle]
@@ -261,10 +263,10 @@ func discover(root string) ([]feature, []string) {
 			continue
 		}
 		for _, feat := range feats {
-			if seen[feat.name] {
+			if seen.Contains(feat.name) {
 				continue
 			}
-			seen[feat.name] = true
+			seen.Add(feat.name)
 			features = append(features, feat)
 		}
 	}

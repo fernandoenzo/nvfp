@@ -369,6 +369,10 @@ func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 		"# comment",
 		"dlss_g, 310.4.0, .dll, nvngx_dlssg.dll",
 		"sl_common_0, 2.14, .dll, sl.common.dll",
+		// A version component must fit the OTA's 8 bits; 2.14.300 would
+		// otherwise collide with 2.15.44.
+		"sl_common_0, 2.14.300, .dll, sl.common.dll",
+		"sl_common_0, 256.0.0, .dll, sl.common.dll",
 	} {
 		if feat, ok := parseFeature(line); ok {
 			t.Errorf("parseFeature(%q) = %+v, want no match", line, feat)
@@ -436,6 +440,24 @@ func TestDiscoverPicksNewestConfig(t *testing.T) {
 	}
 	if len(features) != 1 || features[0].version != "2.9.0" {
 		t.Errorf("features = %+v, want the versions/10 config", features)
+	}
+}
+
+// A malformed config directory never shadows its bundle's valid configs: the
+// newest usable one wins, and the malformed one is warned about.
+func TestDiscoverSkipsMalformedConfigDir(t *testing.T) {
+	root := cacheFixture(t, "",
+		[]bundleSpec{
+			{"sl_sdk_0", "1B0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+			{"sl_sdk_0", "nodash", "", "134657", "sl_common_0, 2.14.1, .dll, sl.common.dll\n"},
+		}, nil)
+
+	features, warnings := discover(root)
+	if len(features) != 1 || features[0].version != "2.14.0" {
+		t.Errorf("features = %+v, want the valid versions/134656 config", features)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "no <arch>_<hash>") {
+		t.Errorf("warnings = %v, want one about the malformed directory name", warnings)
 	}
 }
 

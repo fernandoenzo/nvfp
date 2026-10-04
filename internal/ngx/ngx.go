@@ -188,25 +188,9 @@ type config struct {
 
 // discover finds every Streamline bundle in the cache and returns its features,
 // one per feature name, in bundle-name order, plus a warning per selected
-// config whose directory name or content could not be read.
+// config whose content could not be read.
 func discover(root string) ([]feature, []string) {
-	var (
-		newest   = map[string]config{} // bundle dir -> its config under the highest OTA
-		warnings []string
-	)
-	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || entry.Name() != packageConfigName {
-			return nil
-		}
-		cfg, ok := configFrom(path)
-		if !ok {
-			return nil
-		}
-		if current, seen := newest[cfg.bundle]; !seen || cfg.ota > current.ota {
-			newest[cfg.bundle] = cfg
-		}
-		return nil
-	})
+	newest, warnings := collectConfigs(root)
 	var (
 		features []feature
 		seen     = set.New[string](len(newest))
@@ -214,10 +198,6 @@ func discover(root string) ([]feature, []string) {
 	for _, cfg := range slices.SortedFunc(maps.Values(newest), func(a, b config) int {
 		return cmp.Compare(a.bundle, b.bundle)
 	}) {
-		if cfg.arch == "" || cfg.hash == "" {
-			warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", cfg.path))
-			continue
-		}
 		feats, err := parseConfig(cfg.path, cfg.arch, cfg.hash)
 		if err != nil {
 			warnings = append(warnings, err.Error())
@@ -232,6 +212,33 @@ func discover(root string) ([]feature, []string) {
 		}
 	}
 	return features, warnings
+}
+
+// collectConfigs maps every bundle directory to its config under the highest
+// numeric OTA directory, skipping — and warning about — every config whose
+// directory name carries no <arch>_<hash>, so a malformed newer directory
+// never shadows the valid configs beneath it.
+func collectConfigs(root string) (map[string]config, []string) {
+	newest := map[string]config{} // bundle dir -> its newest well-formed config
+	var warnings []string
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() != packageConfigName {
+			return nil
+		}
+		cfg, ok := configFrom(path)
+		if !ok {
+			return nil
+		}
+		if cfg.arch == "" || cfg.hash == "" {
+			warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", cfg.path))
+			return nil
+		}
+		if current, seen := newest[cfg.bundle]; !seen || cfg.ota > current.ota {
+			newest[cfg.bundle] = cfg
+		}
+		return nil
+	})
+	return newest, warnings
 }
 
 // configFrom parses a package config path in the cache layout

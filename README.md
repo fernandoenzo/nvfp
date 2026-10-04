@@ -10,15 +10,11 @@
   <img src="https://img.shields.io/github/v/release/fernandoenzo/nvfp" alt="GitHub Release">
 </p>
 
-Patches the NVIDIA App profile database (`fingerprint.db`) so it recognizes **UWP / Microsoft Store** games that NVIDIA doesn't detect natively — registers them in the **NVIDIA driver's own profile database** so ReBAR/DLSS overrides actually apply — and tweaks existing game entries through a simple JSON manifest.
+`nvfp` adds missing UWP game entries to NVIDIA App's `fingerprint.db`, registers the process string in the NVIDIA driver profile, and supports manifest overrides, restore and Streamline NGX repair.
 
 ## The problem
 
-NVIDIA App keeps an XML database (`fingerprint.db`) that maps games to their platform (Steam, Epic, GOG…). Many UWP games (Microsoft Store / Xbox PC) are missing from it, so NVIDIA App never applies graphics profiles to them, doesn't list them, and won't optimize them.
-
-Fixing `fingerprint.db` alone is not enough. The driver keeps a separate profile database (`%ProgramData%\NVIDIA Corporation\Drs\nvdrsdb0.bin` / `nvdrsdb1.bin`) where every profile lists the executables that activate it. UWP profiles do not contain the package family name, so when the game launches the driver doesn't recognize it and injects nothing (no ReBAR, no DLSS overrides…). Tools like NvidiaProfileInspectorRevamped fix this by hand through NVAPI; this tool does it automatically, in the same pass as the `fingerprint.db` patch.
-
-This tool locates both databases, patches `fingerprint.db` with the missing entries (or updates existing ones), registers the package family name in the matching driver profile through NVAPI, can restore the pristine `fingerprint.db` afterwards, and (`--sl-override`) repairs the NGX OTA manifest Streamline plugins are loaded from.
+NVIDIA App's XML database often omits UWP games. Adding an entry makes the app recognize them; registering the process string in the separate DRS database lets the driver apply the profile.
 
 ## Requirements
 
@@ -106,43 +102,18 @@ Could not find version matching for plugin: reflex_0
 Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loaded!
 ```
 
-`--sl-override` rebuilds them. It reads the authoritative feature list from every
-Streamline bundle's own `nvngx_package_config.txt` — nothing about the bundles is
-hard-coded, so a new bundle, hash, GPU arch or Streamline version keeps working:
-the cache is walked for `versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt`
-(the config under the highest numeric OTA directory wins), the section name is the
-row's first field, the version its second, and the arch and app hash come from
-that directory name. It restores a payload that exists
-under only one hash from the sibling bundle (identical bytes, matched under the
-same arch so the bytes can never come from another GPU's build), appends the
-missing `[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a
-section that pins an outdated version** — the interposer resolves a feature to
-`versions\<ota>`, so leaving a stale version in place points it at a directory
-the cache may no longer have. The first write copies the manifest to
-`nvngx_config.txt.bak`, that backup is never overwritten, and the manifest
-itself is replaced atomically (temporary sibling + rename), so it is never seen
-half-written.
+`--sl-override` reads each Streamline bundle's `nvngx_package_config.txt`, selects its highest numeric OTA,
+and discovers the bundle's hash and architecture. It adds missing per-feature sections, corrects stale
+versions, and restores payloads only from a matching `_0` / `_override_0` sibling with the same architecture;
+none of those bundle details are hard-coded.
 
-The manifest is parsed, changed in memory and written back whole, which is what
-makes line endings and a stray BOM a non-issue: UTF-8 input with any line
-ending is read, and the output is canonical — UTF-8, CRLF, every line
-terminated, no BOM. A line the parser does not recognise — a comment, a stray
-token, odd spacing — is preserved verbatim, and editing one key never reformats
-the others, so the file comes out byte-identical except for the entries this
-command owns and the canonical form of what it rewrites.
+On the first manifest change it preserves `nvngx_config.txt.bak`. The new manifest is written to a unique temporary sibling, synced and replaced; the containing directory is synced where supported. Rename and crash-durability guarantees still depend on the OS and filesystem.
 
-It is **idempotent**: run it again and it reports that there is nothing to do
-and writes nothing. It is also purely local: it ignores the games manifest, the
-cache and the network, and cannot be combined with `--list`, `--game`,
-`--games-json`, `--doctor`, `--no-driver` or `--restore`. Combine it with `--dry-run` to see
-what it would change.
+The parser rejects invalid UTF-8 and NUL bytes, accepts CRLF/LF/CR and a leading BOM, preserves unrecognized lines and unchanged spacing, and emits canonical UTF-8/CRLF output.
 
-The cache directory is `OTACachePath` from
-`HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to
-`C:\ProgramData\NVIDIA\NGX\models`. Features with no payload in any bundle
-(NVIDIA does not publish every plugin) are reported and skipped. Run it **after
-the NVIDIA App has started** — its bootstrap rewrites the manifest — and before
-launching the game; re-run it after every driver or NVIDIA App update.
+After a successful repair, a fresh run makes no further changes. The operation is local and cannot be combined with `--list`, `--game`, `--games-json`, `--doctor`, `--no-driver` or `--restore`. Use `--dry-run` to preview it.
+
+The cache root is `OTACachePath` in `HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to `C:\ProgramData\NVIDIA\NGX\models`. Features without a payload for the selected architecture are reported and skipped; another GPU's payload is not substituted. Run the repair after the NVIDIA App has started and before launching the game; repeat it after a driver or app update.
 
 ### Skip the driver step
 
@@ -158,22 +129,7 @@ Patches `fingerprint.db` only. No UAC prompt, no NVAPI call: use it when you don
 .\nvfp.exe --list
 ```
 
-```
-Games database version: 1
-Total games: 3
-
-  final_fantasy_vii_remake
-    AppUserModelId: 39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping
-    UWPPackageFamilyName: 39EA002F.EXED1_n746a19ndrrjg
-    DriverApp: 39EA002F.EXED1_n746a19ndrrjg
-  epic_only_game
-    AppUserModelId: 
-    UWPPackageFamilyName: 
-    DriverApp: Custom.exe
-    DriverProfile: Named Profile
-```
-
-`DriverApp` and `DriverProfile` are only printed when set (or, for `DriverApp`, when the game has an `app_user_model_id` to derive it from).
+The list starts with the database version and count, then prints each fingerprint and any available app/driver identity fields. The entries depend on the resolved `games.json`.
 
 ### Patch a single game
 
@@ -208,7 +164,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 
 `--restore` only restores `fingerprint.db`: the entries added to the driver profile database are **not** removed. They are additive, and NVIDIA may legitimately publish the same entries again through an OTA profile update. To remove a driver-profile entry, use NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, which expose the full DRS editing UI.
 
-`--restore` is a purely local file operation: it ignores the manifest, the cache and the network, so it also works offline. It cannot be combined with `--list`, `--game` or `--games-json`. Combine it with `--dry-run` to see which copy would be restored without writing anything.
+`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor` or `--sl-override`. Combine it with `--dry-run` to preview the copy.
 
 ### Print the version
 
@@ -216,17 +172,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 .\nvfp.exe --version
 ```
 
-```
-nvfp 1.3.0 (2026 Oct 1)
-Copyright © 2026 Fernando Enzo Guarini
-License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
-This is free software: you are free to change and redistribute it.
-There is NO WARRANTY, to the extent permitted by law.
-
-Written by Fernando Enzo Guarini.
-```
-
-`-v` is accepted as a shorthand.
+`--version` prints the release, date and GPLv3+ notice. `-v` is a shorthand.
 
 ## The manifest (`games.json`)
 
@@ -260,7 +206,7 @@ Defines which games to patch and how. The program downloads it automatically fro
 | `overrides` | map | XML fields to overwrite or add in the version |
 | `remove` | []string | XML fields to delete from the version |
 
-`driver_app` and `driver_profile` are at most 2047 UTF-16 units (the NVAPI limit, measured in UTF-16 code units, not runes); the manifest is rejected otherwise.
+`driver_app`, `driver_profile` and `app_user_model_id` are limited to 2047 UTF-16 units (the NVAPI limit, measured in code units, not runes); the manifest is rejected otherwise.
 
 ### Wildcard: patch every version at once
 
@@ -359,7 +305,7 @@ For each game with `versions: ["uwp"]`:
 
 With `--sl-override` instead, nothing above runs: it repairs only the NGX OTA manifest, as described in [Repair the Streamline OTA manifest](#repair-the-streamline-ota-manifest).
 
-Nothing is backed up next to it: the NVIDIA App keeps its own pristine copy
+No backup is created beside `fingerprint.db`: NVIDIA App keeps its pristine copy
 under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
 
 ## Driver profiles
@@ -462,7 +408,7 @@ If you decline the prompt, or the relaunch fails, the driver step is skipped wit
 The program looks for `games.json` in this order:
 
 1. **Remote** (GitHub) — if online, downloads the latest version and caches it
-2. **Local cache** (`%LOCALAPPDATA%\nvfp\games.json`) — if offline but a previous download exists
+2. **Local cache** (`%LOCALAPPDATA%\nvidia-uwp-patch\games.json`) — if offline but a previous download exists
 3. **Embedded** in the .exe — final fallback, always available
 
 If the cache exists but is corrupt, it warns you and falls back to the embedded copy.
@@ -476,46 +422,9 @@ make build
 Produces `nvfp.exe` for Windows amd64, with the application icon embedded as a
 Windows PE resource.
 
-### Windows icon resources
+The `.syso` icon resource is committed, so `make build` needs no MinGW toolchain. After changing `nvfp.rc` or `nvfp.ico`, run `make resources` (requires `x86_64-w64-mingw32-windres`).
 
-The icon lives in `nvfp.ico` and is declared in the resource script `nvfp.rc`:
-
-```
-1 ICON "nvfp.ico"
-```
-
-`x86_64-w64-mingw32-windres` compiles that script into
-`nvfp_res_windows_amd64.syso`, a COFF object holding the `.rsrc` section that the
-Go linker merges into the executable. Because the name ends in
-`_windows_amd64`, the Go toolchain picks it up only when targeting Windows amd64 —
-Linux builds and `go test ./...` are unaffected.
-
-The `.syso` is committed, so `make build` needs no MinGW toolchain. Regenerate it
-only after changing `nvfp.rc` or `nvfp.ico`:
-
-```bash
-make resources   # requires x86_64-w64-mingw32-windres (apt: binutils-mingw-w64-x86-64)
-```
-
-`make build` aborts with a clear message if the `.syso` is missing, so an
-icon-less binary is never produced by accident.
-
-### NVAPI binding
-
-The driver-profile step talks to NVAPI through hard-coded function IDs, status codes and struct layouts, so those values have to match NVIDIA's headers exactly. They live in `internal/nvdr/nvapi.go` with no build tag, so they are testable on any platform, and `internal/nvdr/nvapi_pinned_test.go` pins every one of them as a literal: a typo in an ID compiles and would only fail against a real driver, which no test can reach. The struct sizes and offsets are additionally asserted at compile time against the values measured from NVIDIA's headers for amd64, so editing a struct breaks the build instead of silently corrupting the driver database.
-
-### Reproducible builds
-
-The build is fully reproducible: the same source code always produces the same binary, regardless of the machine, OS, or filesystem layout. This is achieved with:
-
-- `-trimpath` — strips filesystem paths from the binary
-- `-buildvcs=false` — excludes VCS metadata from build info
-- `-ldflags="-s -w -buildid="` — strips debug info and build ID
-- `CGO_ENABLED=0` — pure Go, no host C toolchain dependency
-- `windres` writes no timestamps for icon resources, so the committed `.syso` — and therefore the `.exe` — is reproducible too
-- all NVAPI values are literals in the source, so `make build` needs neither network access nor a C compiler
-
-Two people building the same commit on different machines will get bit-for-bit identical binaries.
+The build targets Windows amd64 with CGO disabled. Reproducible output requires the same Go toolchain, module versions and build flags; a cold module cache may need network access to download dependencies.
 
 ## License
 

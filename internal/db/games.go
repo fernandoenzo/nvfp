@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
+	"github.com/fernandoenzo/nvfp/internal/fsutil"
 	"github.com/fernandoenzo/set"
 )
 
@@ -131,14 +132,14 @@ func LoadFromPath(path string) (*GameDB, error) {
 
 // SaveToPath saves the game database to a file.
 func SaveToPath(db *GameDB, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := fsutil.MkdirAllSync(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating cache directory: %w", err)
 	}
 	data, err := json.Marshal(db, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("marshaling games.json: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := fsutil.WriteFileAtomic(path, data, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil

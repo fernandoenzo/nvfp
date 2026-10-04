@@ -10,7 +10,6 @@ build: $(RES_DEP)
 	@test -f $(RES_OBJ) || { echo "$(RES_OBJ) missing: run 'make resources' (needs $(WINDRES))"; exit 1; }
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o nvfp.exe .
 
-# Rebuild the Windows resource object (application icon) from $(RC).
 resources: $(RES_OBJ)
 
 $(RES_OBJ): $(RC) nvfp.ico

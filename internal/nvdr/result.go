@@ -41,9 +41,9 @@ func StatusName(status int32) string {
 // Request is one game's driver-profile work.
 type Request struct {
 	Fingerprint string   // for messages only
-	App         string   // string to register (PackageFamilyName)
+	App         string   // application string to register (driver_app override or package family name)
 	Profile     string   // exact profile name; empty means automatic resolution
-	Candidates  []string // .exe names from the fingerprint for automatic resolution
+	Candidates  []string // <DriverProfile> values tried during automatic resolution
 }
 
 // Result reports the outcome for one request.

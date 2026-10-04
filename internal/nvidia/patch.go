@@ -35,9 +35,8 @@ type versionPlan struct {
 	missing  []string
 }
 
-// PatchGame ensures the requested versions of a game exist and carry the
-// given overrides/removals. UWP versions are added when missing; other
-// versions are only updated. Returns a PatchResult indicating what happened.
+// PatchGame ensures requested versions exist and carry the given overrides and
+// removals. It adds a missing UWP version and updates requested existing ones.
 func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 	fp := FindFingerprint(fdb, game.Fingerprint)
 	if fp == nil {

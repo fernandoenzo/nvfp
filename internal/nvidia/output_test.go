@@ -28,7 +28,6 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatalf("expected patched, got %s", result.Status)
 	}
 
-	// Write to temp file and read back content
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
 	if err := WriteFingerprintDB(db, tmpPath); err != nil {
@@ -41,7 +40,6 @@ func TestPatchOutputContent(t *testing.T) {
 	}
 	content := string(contentBytes)
 
-	// Elements that MUST be present in the UWP version
 	mustPresent := []string{
 		`name="uwp"`,
 		`<UWPPackageFamilyName>39EA002F.EXED1_n746a19ndrrjg</UWPPackageFamilyName>`,
@@ -73,7 +71,6 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatal("UWP version not found")
 	}
 
-	// Check that removed elements are absent from the UWP version
 	removedElements := []string{"Files", "Launch", "SteamAppIds", "Directories", "InstallDirRegValues", "WhisperModePopsFactor"}
 	for _, name := range removedElements {
 		for _, elem := range uwpVersion.Elements {
@@ -83,7 +80,6 @@ func TestPatchOutputContent(t *testing.T) {
 		}
 	}
 
-	// Check that UWP-specific fields are present
 	elementNames := set.New[string](len(uwpVersion.Elements))
 	for _, elem := range uwpVersion.Elements {
 		elementNames.Add(strings.ToLower(elem.ElementName()))
@@ -99,14 +95,12 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Error("UWP version should contain Distributor")
 	}
 
-	// Check Distributor is UWP
 	for _, elem := range uwpVersion.Elements {
 		if strings.EqualFold(elem.ElementName(), "distributor") && elem.Content != "UWP" {
 			t.Errorf("Distributor = %q, want UWP", elem.Content)
 		}
 	}
 
-	// Check that the override replaced the source value
 	for _, elem := range uwpVersion.Elements {
 		if elem.ElementName() == "DriverProfile" && elem.Content != "FF7R_UWP.exe" {
 			t.Errorf("DriverProfile = %q, want FF7R_UWP.exe", elem.Content)
@@ -119,7 +113,6 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Error("output contains &#xA; entities from indentation whitespace")
 	}
 
-	// Verify we can round-trip
 	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
@@ -144,7 +137,6 @@ func TestPatchOutputContent(t *testing.T) {
 		t.Fatal("UWP version not found after round-trip")
 	}
 
-	// Verify round-trip preserved UWP fields
 	uwp2Names := set.New[string](len(uwp2.Elements))
 	for _, elem := range uwp2.Elements {
 		uwp2Names.Add(strings.ToLower(elem.ElementName()))

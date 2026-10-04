@@ -1,7 +1,6 @@
 package ngx
 
-// Tests for the manifest model and its serializer: the only code in the package
-// that knows the file format.
+// Tests for the manifest text parser and serializer.
 
 import (
 	"strings"
@@ -100,11 +99,16 @@ func TestManifestToleratesUTF8BOMAndLineEndings(t *testing.T) {
 	}
 }
 
-// A file with NUL bytes is not the UTF-8 text the interposer reads: it must be
-// refused, never guessed.
-func TestManifestRefusesNonUTF8(t *testing.T) {
+// NUL is valid UTF-8, but the interposer does not treat NUL-filled files as text.
+func TestManifestRefusesNUL(t *testing.T) {
 	if _, err := parseManifest([]byte("[dlss]\x00\x00garbage")); err == nil {
-		t.Error("a NUL-filled file must be refused, not guessed")
+		t.Error("a NUL-filled manifest must be refused")
+	}
+}
+
+func TestManifestRefusesInvalidUTF8(t *testing.T) {
+	if _, err := parseManifest([]byte{'[', 'd', 'l', 's', 's', ']', 0xff}); err == nil {
+		t.Error("an invalid UTF-8 manifest must be refused")
 	}
 }
 

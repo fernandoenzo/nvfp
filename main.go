@@ -25,8 +25,6 @@ const (
 	versionDate = "2026 Oct 2"
 )
 
-// versionMessage is the banner printed by --version. It mirrors the version
-// banner of the author's other command-line tools.
 const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
 	"Copyright © 2026 Fernando Enzo Guarini\n" +
 	"License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\n" +
@@ -55,7 +53,7 @@ var (
 // exercise the real flag wiring.
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "nvidia-uwp-patch",
+		Use:   "nvfp",
 		Short: "Patch NVIDIA App fingerprint.db to add UWP game profiles",
 		Args:  cobra.NoArgs,
 		RunE:  run,
@@ -71,7 +69,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&elevatedFlag, "elevated", false, "Internal: set after the UAC relaunch")
 	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
-	rootCmd.Flags().BoolVar(&slOverrideFlag, "sl-override", false, "Add the missing Streamline per-feature sections to the NGX OTA manifest")
+	rootCmd.Flags().BoolVar(&slOverrideFlag, "sl-override", false, "Repair Streamline payloads and per-feature entries in the NGX cache")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
@@ -170,7 +168,7 @@ func restoreDB() error {
 		return nil
 	}
 	// The working copy may be gone entirely; recreate its directory.
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := fsutil.MkdirAllSync(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
 	}
 	if err := fsutil.CopyFile(src, dst); err != nil {
@@ -212,10 +210,9 @@ func ensureElevated(wanted bool) {
 // calls ngx.Root.
 var ngxRoot = ngx.Root
 
-// applySLOverride repairs the NGX OTA manifest: it reports what the Streamline
-// bundles are missing (or, with --dry-run, what it would do) and writes the
-// missing per-feature sections, backing the manifest up first. The repair
-// needs Administrator privileges, so it requests UAC when it has work to do.
+// applySLOverride repairs the NGX cache: it copies compatible sibling payloads,
+// adds missing per-feature sections and corrects stale versions. It backs up
+// the manifest before changing it and requests UAC only when work is pending.
 func applySLOverride() error {
 	root, err := ngxRoot()
 	if err != nil {
@@ -252,9 +249,7 @@ func printSLPlan(plan *ngx.Plan) {
 	for _, section := range plan.Updates {
 		fmt.Printf("  → would update [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
 	}
-	if !plan.Changed() {
-		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
-	}
+	printSLNoOp(plan)
 	warnMissingFeatures(plan)
 }
 
@@ -271,23 +266,37 @@ func printSLResult(plan *ngx.Plan) {
 	for _, section := range plan.Updates {
 		fmt.Printf("  ✓ updated [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
 	}
-	if !plan.Changed() {
-		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
-	} else if len(plan.Additions) > 0 || len(plan.Updates) > 0 {
+	printSLNoOp(plan)
+	if len(plan.Additions) > 0 || len(plan.Updates) > 0 {
 		// The .bak is written only when the manifest itself changes.
 		fmt.Printf("  backup: %s\n", plan.Backup)
 	}
 	warnMissingFeatures(plan)
 }
 
-// warnMissingFeatures reports the features NVIDIA does not ship at all: no
-// payload means no section can be added.
+func printSLNoOp(plan *ngx.Plan) {
+	if plan.Changed() {
+		return
+	}
+	if len(plan.Missing) > 0 {
+		fmt.Println("  ⊘ no repairable changes: no matching-architecture payload is available for some features")
+		return
+	}
+	if len(plan.Warnings) > 0 {
+		fmt.Println("  ⊘ no repairable changes found; review the warnings for cache details")
+		return
+	}
+	fmt.Println("  ⊘ nothing to do: all discovered per-feature sections are present and current")
+}
+
+// warnMissingFeatures reports features with no payload for their discovered
+// architecture in either sibling variant.
 func warnMissingFeatures(plan *ngx.Plan) {
 	if len(plan.Missing) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Warning: no payload in any bundle for: %v\n", plan.Missing)
-	fmt.Fprintln(os.Stderr, "These are not in the NGX cache: NVIDIA has not published them, so they are skipped.")
+	fmt.Fprintf(os.Stderr, "Warning: no compatible-architecture payload for: %v\n", plan.Missing)
+	fmt.Fprintln(os.Stderr, "These features are skipped; payloads for another GPU architecture cannot be substituted.")
 }
 
 func resolveGames() (*db.GameDB, error) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/fsutil"
 	"github.com/fernandoenzo/set"
 )
 
@@ -64,8 +65,6 @@ var defaultRemoveFields = []string{
 	"OculusAppId",
 }
 
-// ---- Core operations ----
-
 // ParseFingerprintDB reads and parses a fingerprint.db file.
 func ParseFingerprintDB(path string) (*FingerprintDB, error) {
 	f, err := os.Open(path)
@@ -107,18 +106,20 @@ func stripElementWhitespace(elems *[]XmlElement) {
 	}
 }
 
-// WriteFingerprintDB writes the FingerprintDB to a file with XML header.
+// WriteFingerprintDB writes an XML-declared database through an atomic file replacement.
 func WriteFingerprintDB(db *FingerprintDB, path string) error {
 	output, err := xml.MarshalIndent(db, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling XML: %w", err)
 	}
 
-	content := xml.Header + string(output) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	content := make([]byte, 0, len(xml.Header)+len(output)+1)
+	content = append(content, xml.Header...)
+	content = append(content, output...)
+	content = append(content, '\n')
+	if err := fsutil.WriteFileAtomic(path, content, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
-
 	return nil
 }
 

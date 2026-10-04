@@ -21,7 +21,6 @@ func TestParseFingerprintDB(t *testing.T) {
 		t.Fatalf("expected 5 fingerprints, got %d", len(db.Fingerprints))
 	}
 
-	// Check first fingerprint
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
 	if fp == nil {
 		t.Fatal("expected to find final_fantasy_vii_remake")
@@ -30,7 +29,6 @@ func TestParseFingerprintDB(t *testing.T) {
 		t.Fatalf("expected 2 versions, got %d", len(fp.Versions))
 	}
 
-	// Check steam version has expected elements
 	steam := FindSourceVersion(fp)
 	if steam == nil {
 		t.Fatal("expected to find source version")
@@ -76,12 +74,10 @@ func TestAddUWPVersion(t *testing.T) {
 	appID := "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping"
 	got := AddUWPVersion(src, appID, nil, nil)
 
-	// Check name
 	if got.Name != "uwp" {
 		t.Errorf("got name = %q, want uwp", got.Name)
 	}
 
-	// Check that removed fields are gone
 	elementNames := set.New[string](len(got.Elements))
 	for _, e := range got.Elements {
 		elementNames.Add(strings.ToLower(e.ElementName()))
@@ -93,7 +89,6 @@ func TestAddUWPVersion(t *testing.T) {
 		}
 	}
 
-	// Check that UWP-specific fields are present
 	if !elementNames.Contains("uwppackagefamilyname") {
 		t.Error("got should contain UWPPackageFamilyName")
 	}
@@ -101,7 +96,6 @@ func TestAddUWPVersion(t *testing.T) {
 		t.Error("got should contain AppUserModelId")
 	}
 
-	// Check Distributor is UWP
 	for _, e := range got.Elements {
 		if strings.ToLower(e.ElementName()) == "distributor" {
 			if e.Content != "UWP" {
@@ -110,7 +104,6 @@ func TestAddUWPVersion(t *testing.T) {
 		}
 	}
 
-	// Check preserved fields
 	if !elementNames.Contains("cmsid") {
 		t.Error("got should contain CMSID")
 	}
@@ -118,7 +111,6 @@ func TestAddUWPVersion(t *testing.T) {
 		t.Error("got should contain DriverProfile")
 	}
 
-	// Check UWPPackageFamilyName derivation
 	for _, e := range got.Elements {
 		if e.ElementName() == "UWPPackageFamilyName" {
 			if e.Content != "39EA002F.EXED1_n746a19ndrrjg" {
@@ -220,19 +212,15 @@ func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 		seen[strings.ToLower(e.ElementName())] = e.Content
 	}
 
-	// Override replaced the existing element content
 	if seen["driverprofile"] != "game_uwp.exe" {
 		t.Errorf("DriverProfile = %q, want game_uwp.exe", seen["driverprofile"])
 	}
-	// New override was appended
 	if seen["newfield"] != "new-value" {
 		t.Errorf("NewField = %q, want new-value", seen["newfield"])
 	}
-	// Removed element is gone
 	if _, ok := seen["cmsid"]; ok {
 		t.Error("CMSID should have been removed")
 	}
-	// Forced fields of the existing version are untouched
 	if seen["distributor"] != "UWP" {
 		t.Errorf("Distributor = %q, want UWP", seen["distributor"])
 	}
@@ -309,7 +297,6 @@ func TestPatchGame_UpdateExistingUWP_KeepsDefaultRemoveFields(t *testing.T) {
 func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// final_fantasy_vii_remake has steam + epic, no uwp
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "TestPkg!App", Versions: []string{"uwp", "steam"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -317,12 +304,10 @@ func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
 	}
 
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
-	// UWP was added
 	uwp := findVersion(fp, "uwp")
 	if uwp == nil {
 		t.Fatal("UWP version should have been added")
 	}
-	// Steam was updated with the override
 	steam := findVersion(fp, "steam")
 	if steam == nil {
 		t.Fatal("steam version not found")
@@ -336,7 +321,6 @@ func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
 	if !found {
 		t.Error("steam version should have DriverProfile=custom.exe")
 	}
-	// Epic untouched
 	epic := findVersion(fp, "epic")
 	if epic == nil {
 		t.Fatal("epic version not found")
@@ -351,7 +335,6 @@ func TestPatchGame_EnsureVersions_AddAndUpdate(t *testing.T) {
 func TestPatchGame_EnsureVersions_MultiUpdate(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// already_uwp_game has steam + uwp
 	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"steam", "uwp"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -388,7 +371,6 @@ func TestPatchGame_EnsureVersions_Missing(t *testing.T) {
 func TestPatchGame_EnsureVersions_Mixed(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// uwp added, gog missing
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "TestPkg!App", Versions: []string{"uwp", "gog"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -437,7 +419,6 @@ func TestPatchGame_EnsureVersions_NoChanges(t *testing.T) {
 func TestPatchGame_Wildcard_UpdatesAllVersions(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// final_fantasy_vii_remake has steam + epic, no uwp
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "TestPkg!App", Versions: []string{"*"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -445,7 +426,6 @@ func TestPatchGame_Wildcard_UpdatesAllVersions(t *testing.T) {
 	}
 
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")
-	// Every existing version was updated
 	for _, name := range []string{"steam", "epic"} {
 		v := findVersion(fp, name)
 		if v == nil {
@@ -461,7 +441,6 @@ func TestPatchGame_Wildcard_UpdatesAllVersions(t *testing.T) {
 			t.Errorf("%s version should have DriverProfile=custom.exe", name)
 		}
 	}
-	// UWP was added because app_user_model_id is present
 	uwp := findVersion(fp, "uwp")
 	if uwp == nil {
 		t.Fatal("UWP version should have been added")
@@ -484,7 +463,6 @@ func TestPatchGame_Wildcard_UpdatesAllVersions(t *testing.T) {
 func TestPatchGame_Wildcard_NoAumid_NoUWPAdded(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// final_fantasy_vii_remake has steam + epic, no uwp; no app_user_model_id
 	overrides := map[string]string{"DriverProfile": "custom.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", Versions: []string{"*"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -495,7 +473,6 @@ func TestPatchGame_Wildcard_NoAumid_NoUWPAdded(t *testing.T) {
 	if findVersion(fp, "uwp") != nil {
 		t.Error("UWP version should NOT have been added without app_user_model_id")
 	}
-	// Existing versions were still updated
 	steam := findVersion(fp, "steam")
 	if steam == nil {
 		t.Fatal("steam version not found")
@@ -523,7 +500,6 @@ func TestPatchGame_Wildcard_NoOverrides_Idempotent(t *testing.T) {
 func TestPatchGame_Wildcard_ExistingUWP_Updated(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// already_uwp_game has steam + uwp
 	overrides := map[string]string{"DriverProfile": "game_uwp.exe"}
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "already_uwp_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}, Overrides: overrides})
 	if result.Status != StatusPatched {
@@ -531,7 +507,6 @@ func TestPatchGame_Wildcard_ExistingUWP_Updated(t *testing.T) {
 	}
 
 	fp := FindFingerprint(db, "already_uwp_game")
-	// No duplicate UWP version was created
 	uwpCount := 0
 	for _, v := range fp.Versions {
 		if strings.EqualFold(v.Name, "uwp") {
@@ -541,7 +516,6 @@ func TestPatchGame_Wildcard_ExistingUWP_Updated(t *testing.T) {
 	if uwpCount != 1 {
 		t.Errorf("UWP version count = %d, want 1", uwpCount)
 	}
-	// Both existing versions were updated
 	for _, name := range []string{"steam", "uwp"} {
 		v := findVersion(fp, name)
 		if v == nil {
@@ -571,7 +545,6 @@ func TestPatchGame_Wildcard_NotFound(t *testing.T) {
 func TestPatchGame_Wildcard_NoSource(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
-	// empty_game has no versions to build a UWP from
 	result := PatchGame(db, &gamesdb.Game{Fingerprint: "empty_game", AppUserModelID: "Pkg!App", Versions: []string{"*"}})
 	if result.Status != StatusNoSource {
 		t.Errorf("status = %q, want %q", result.Status, StatusNoSource)
@@ -579,12 +552,10 @@ func TestPatchGame_Wildcard_NoSource(t *testing.T) {
 }
 
 func TestWriteAndReadRoundTrip(t *testing.T) {
-	// Parse, modify, write, re-parse
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
 	PatchGame(db, &gamesdb.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
-	// Write to temp file
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
 
@@ -592,7 +563,6 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	// Re-parse
 	db2, err := ParseFingerprintDB(tmpPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
@@ -603,12 +573,10 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 		t.Fatal("fingerprint not found after round-trip")
 	}
 
-	// Should now have 3 versions (steam, epic, uwp)
 	if len(fp.Versions) != 3 {
 		t.Errorf("expected 3 versions after patch, got %d", len(fp.Versions))
 	}
 
-	// Find the UWP version
 	var uwpFound bool
 	for _, v := range fp.Versions {
 		if v.Name == "uwp" {
@@ -622,7 +590,6 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 }
 
 func TestXmlUnmarshalMarshal(t *testing.T) {
-	// Test that our XML model can parse and re-serialize the test file
 	data, err := os.ReadFile(filepath.Join("testdata", "fingerprint.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -633,7 +600,6 @@ func TestXmlUnmarshalMarshal(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	// Re-marshal
 	output, err := xml.MarshalIndent(db, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -641,7 +607,6 @@ func TestXmlUnmarshalMarshal(t *testing.T) {
 
 	result := string(output)
 
-	// Basic checks
 	if !strings.Contains(result, "final_fantasy_vii_remake") {
 		t.Error("output missing fingerprint name")
 	}
@@ -676,7 +641,6 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 
 	appID := "TestPkg_abc!TestApp"
 
-	// Override a forced field (Distributor) and a non-forced field.
 	// User overrides take priority over forced field defaults.
 	overrides := map[string]string{
 		"Distributor":   "CustomDist",
@@ -685,14 +649,12 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 
 	got := AddUWPVersion(src, appID, overrides, nil)
 
-	// Build a map of element names (lowercased) to count and content
 	seen := make(map[string][]string)
 	for _, e := range got.Elements {
 		lower := strings.ToLower(e.ElementName())
 		seen[lower] = append(seen[lower], e.Content)
 	}
 
-	// Distributor must appear exactly once with the override value
 	if count := len(seen["distributor"]); count != 1 {
 		t.Errorf("Distributor appeared %d times, want 1", count)
 	}
@@ -700,7 +662,6 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 		t.Errorf("Distributor = %q, want CustomDist (override wins over forced default)", seen["distributor"][0])
 	}
 
-	// UWPPackageFamilyName must appear exactly once
 	if count := len(seen["uwppackagefamilyname"]); count != 1 {
 		t.Errorf("UWPPackageFamilyName appeared %d times, want 1", count)
 	}
@@ -708,7 +669,6 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 		t.Errorf("UWPPackageFamilyName = %q, want TestPkg_abc", seen["uwppackagefamilyname"][0])
 	}
 
-	// AppUserModelId must appear exactly once
 	if count := len(seen["appusermodelid"]); count != 1 {
 		t.Errorf("AppUserModelId appeared %d times, want 1", count)
 	}
@@ -716,7 +676,6 @@ func TestAddUWPVersion_ForcedFieldOverride(t *testing.T) {
 		t.Errorf("AppUserModelId = %q, want %s", seen["appusermodelid"][0], appID)
 	}
 
-	// Non-forced override should also work
 	if count := len(seen["driverprofile"]); count != 1 {
 		t.Errorf("DriverProfile appeared %d times, want 1", count)
 	}
@@ -739,7 +698,6 @@ func TestAddUWPVersion_ForcedFieldNoOverride(t *testing.T) {
 		seen[lower] = append(seen[lower], e.Content)
 	}
 
-	// Without overrides, Distributor defaults to UWP
 	if count := len(seen["distributor"]); count != 1 {
 		t.Errorf("Distributor appeared %d times, want 1", count)
 	}
@@ -747,7 +705,6 @@ func TestAddUWPVersion_ForcedFieldNoOverride(t *testing.T) {
 		t.Errorf("Distributor = %q, want UWP", seen["distributor"][0])
 	}
 
-	// UWPPackageFamilyName and AppUserModelId must also appear exactly once
 	if count := len(seen["uwppackagefamilyname"]); count != 1 {
 		t.Errorf("UWPPackageFamilyName appeared %d times, want 1", count)
 	}
@@ -764,7 +721,6 @@ func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
 	appID := "TestPkg_abc!TestApp"
 	got := AddUWPVersion(src, appID, nil, nil)
 
-	// Collect the order of forced fields as they appear in the got
 	var order []string
 	for _, e := range got.Elements {
 		lower := strings.ToLower(e.ElementName())
@@ -800,7 +756,6 @@ func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {
 
 	got := AddUWPVersion(src, "TestPkg_abc!App", overrides, nil)
 
-	// Collect the non-forced override elements by their appearance order
 	var overrideNames []string
 	for _, e := range got.Elements {
 		name := e.ElementName()
@@ -809,7 +764,6 @@ func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {
 		}
 	}
 
-	// Non-forced overrides must appear in sorted order by key
 	if len(overrideNames) != 3 {
 		t.Fatalf("expected 3 non-forced override elements, got %d", len(overrideNames))
 	}
@@ -871,7 +825,6 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	// Verify elements were parsed
 	fp := FindFingerprint(&db, "with_metadata")
 	if fp == nil {
 		t.Fatal("fingerprint with_metadata not found")
@@ -893,7 +846,6 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Errorf("IsCreativeApplication = %q, want %q", elemNames["iscreativeapplication"], "1")
 	}
 
-	// Verify Versions still present
 	if len(fp.Versions) != 1 {
 		t.Fatalf("expected 1 version, got %d", len(fp.Versions))
 	}
@@ -901,7 +853,6 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Errorf("version name = %q, want steam", fp.Versions[0].Name)
 	}
 
-	// Round-trip: marshal and re-parse
 	output, err := xml.MarshalIndent(&db, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -918,7 +869,6 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Fatal("fingerprint with_metadata not found after round-trip")
 	}
 
-	// Verify elements preserved after round-trip
 	elemNames2 := make(map[string]string)
 	for _, e := range fp2.Elements {
 		elemNames2[strings.ToLower(e.ElementName())] = e.Content
@@ -933,7 +883,6 @@ func TestFingerprintLevelElementsPreserved(t *testing.T) {
 		t.Errorf("round-trip IsCreativeApplication = %q, want %q", elemNames2["iscreativeapplication"], "1")
 	}
 
-	// Verify versions still intact after round-trip
 	if len(fp2.Versions) != 1 {
 		t.Fatalf("round-trip: expected 1 version, got %d", len(fp2.Versions))
 	}
@@ -952,7 +901,6 @@ func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 		t.Fatalf("expected patched, got %s: %s", result.Status, result.Message)
 	}
 
-	// Write to temp and re-read
 	tmpDir := t.TempDir()
 	tmpPath := filepath.Join(tmpDir, "fingerprint.db")
 	if err := WriteFingerprintDB(db, tmpPath); err != nil {
@@ -982,8 +930,6 @@ func TestFingerprintLevelElementsNotLostOnPatch(t *testing.T) {
 }
 
 func TestParseFingerprintDB_FingerprintDBRoot(t *testing.T) {
-	// Verify that the root element <FingerprintDB> is correctly parsed.
-	// This is the real-world root element name (BUG-0 fix).
 	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	if err != nil {
 		t.Fatalf("ParseFingerprintDB failed: %v", err)

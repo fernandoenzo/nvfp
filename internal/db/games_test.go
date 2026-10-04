@@ -178,7 +178,6 @@ func TestResolveGamesRemote(t *testing.T) {
 		t.Errorf("expected remote game, got %s", db.Games[0].Fingerprint)
 	}
 
-	// Check cache was written
 	cachePath := filepath.Join(cacheDir, "games.json")
 	if _, err := os.Stat(cachePath); err != nil {
 		t.Errorf("cache file not created: %v", err)
@@ -212,7 +211,6 @@ func TestResolveGamesFallbackToBundled(t *testing.T) {
 	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 	cacheDir := t.TempDir()
 
-	// No remote data, no cache → should use bundled
 	db, err := ResolveGames(cacheDir, bundled, nil)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
@@ -238,7 +236,6 @@ func TestResolveGamesRemoteParseError(t *testing.T) {
 func TestResolveGamesCorruptCache(t *testing.T) {
 	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 
-	// captureStderr swaps os.Stderr for a pipe and returns the captured output.
 	captureStderr := func(t *testing.T, fn func()) string {
 		t.Helper()
 		r, w, err := os.Pipe()

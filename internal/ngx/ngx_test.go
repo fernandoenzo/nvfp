@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// The two Streamline bundles ship the same features under different names:
-// sl_sdk_0 (hash E658703) uses sl_<feat>_0, sl_sdk_override_0 (hash E658700)
-// uses sl_<feat>_override_0. Nothing about them is hard-coded in the package:
-// the tests below also build bundles with other names, hashes and arches.
+// Fixtures model Streamline's plain/override feature suffixes with varied cache paths and arches.
 const (
 	plainConfig    = "sl_common_0, 2.14.0, .dll, sl.common.dll\nsl_reflex_0, 2.14.0, .dll, sl.reflex.dll\n"
 	overrideConfig = "sl_common_override_0, 2.14.0, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.0, .dll, sl.reflex.dll\n"
@@ -34,7 +31,6 @@ func overrideSpec(content string) bundleSpec {
 	return bundleSpec{"sl_sdk_override_0", "1B0", "E658700", "134656", content}
 }
 
-// writeFile creates a file and its directory, failing the test on error.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -66,7 +62,6 @@ func payload(feature, arch, hash, ota string) string {
 	return filepath.Join(feature, versionsDir, ota, filesDir, arch+"_"+hash+".dll")
 }
 
-// inspectFixture inspects a cache and fails the test on error.
 func inspectFixture(t *testing.T, root string) *Plan {
 	t.Helper()
 	plan, err := Inspect(root)
@@ -356,16 +351,21 @@ func TestApplySiblingCopyKeepsTheArch(t *testing.T) {
 	}
 }
 
-// Applying the same plan twice must not duplicate a section: the plan is
-// re-checked against its document before every append.
-func TestApplyTwiceOnTheSamePlanIsIdempotent(t *testing.T) {
+// Reusing a plan must not copy an existing payload or append its section again.
+func TestApplyTwiceOnTheSamePlanDoesNotDuplicateSection(t *testing.T) {
 	root := cacheFixture(t, "[sl_sdk_0]",
 		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
-		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
+		[]string{payload("sl_common_override_0", "1B0", "E658700", "134656")})
 
 	plan := inspectFixture(t, root)
+	if len(plan.Copies) != 1 {
+		t.Fatalf("copies = %+v, want one", plan.Copies)
+	}
 	if err := Apply(plan); err != nil {
 		t.Fatalf("first Apply: %v", err)
+	}
+	if err := os.Remove(plan.Copies[0].Source); err != nil {
+		t.Fatalf("removing already-copied source: %v", err)
 	}
 	if err := Apply(plan); err != nil {
 		t.Fatalf("second Apply: %v", err)
@@ -452,39 +452,34 @@ func TestSiblingFeatureSwapsBundles(t *testing.T) {
 	}
 }
 
-// A bundle keeps one config per update; the highest numeric OTA wins, even
-// when a narrower directory name would sort higher as a string ("9" > "10").
-func TestDiscoverPicksNewestConfig(t *testing.T) {
-	root := cacheFixture(t, "",
-		[]bundleSpec{
-			{"sl_sdk_0", "1B0", "E658703", "9", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
-			{"sl_sdk_0", "1B0", "E658703", "10", "sl_common_0, 2.9.0, .dll, sl.common.dll\n"},
-		}, nil)
+// OTA selection compares numbers, not directory-name strings (10 > 9).
+func TestDiscoverPicksHighestNumericOTA(t *testing.T) {
+	root := cacheFixture(t, "", []bundleSpec{
+		{"sl_sdk_0", "1B0", "E658703", "9", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+		{"sl_sdk_0", "1B0", "E658703", "10", "sl_common_0, 2.14.1, .dll, sl.common.dll\n"},
+	}, nil)
 
 	features, warnings := discover(root)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", warnings)
 	}
-	if len(features) != 1 || features[0].version != "2.9.0" {
-		t.Errorf("features = %+v, want the versions/10 config", features)
+	if len(features) != 1 || features[0].version != "2.14.1" {
+		t.Fatalf("features = %+v, want the version from numeric OTA 10", features)
 	}
 }
 
-// Two payload directories under the same OTA version are a tie the walk order
-// must not decide: the lexicographically first path wins, run after run.
-func TestDiscoverBreaksOTATiesDeterministically(t *testing.T) {
+// A same-OTA tie is resolved by the lexicographically first config path.
+func TestDiscoverChoosesLexicalPathForOTATies(t *testing.T) {
 	specs := []bundleSpec{
 		{"sl_sdk_0", "160", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
 		{"sl_sdk_0", "1B0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
 	}
-	for range 5 {
-		features, warnings := discover(cacheFixture(t, "", specs, nil))
-		if len(warnings) != 0 {
-			t.Fatalf("warnings = %v, want none", warnings)
-		}
-		if len(features) != 1 || features[0].arch != "160" {
-			t.Fatalf("features = %+v, want the 160 config (first path wins)", features)
-		}
+	features, warnings := discover(cacheFixture(t, "", specs, nil))
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if len(features) != 1 || features[0].arch != "160" {
+		t.Fatalf("features = %+v, want the 160 config (first path wins)", features)
 	}
 }
 

@@ -13,10 +13,7 @@ import (
 )
 
 var (
-	// nvapi64.dll lives in Windows\System32, so the system-only variant is
-	// used: it restricts the search to that directory and removes the DLL
-	// preloading risk the stdlib's NewLazyDLL carries (x/sys documents the
-	// hazard, the stdlib does not).
+	// Load nvapi64.dll only from System32 to prevent DLL search-order hijacking.
 	modNVAPI           = windows.NewLazySystemDLL("nvapi64.dll")
 	procQueryInterface = modNVAPI.NewProc("nvapi_QueryInterface")
 )
@@ -121,9 +118,8 @@ func (a *api) findProfileByName(session uintptr, name string) (uintptr, int32) {
 	return handle, int32(r)
 }
 
-// Diagnose resolves every request the way Apply would, but only reports what it
-// found: it never writes and never needs a session that can save. The result is
-// one slice of attempts per candidate, in the order they were tried.
+// Diagnose resolves each request as Apply does, but only returns lookup attempts.
+// It never saves settings; the outer result slice has one entry per request.
 func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 	a, err := openAPI()
 	if err != nil {

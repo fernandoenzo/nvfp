@@ -45,8 +45,6 @@ func TestToUTF16(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// dst is deliberately zeroed here to keep the case independent of
-			// the terminator; toUTF16 writes it either way.
 			dst := make([]uint16, tt.size)
 			if err := toUTF16(dst, tt.in); err != nil {
 				t.Fatalf("toUTF16(%q) into %d units: %v", tt.in, tt.size, err)
@@ -75,8 +73,6 @@ func TestToUTF16(t *testing.T) {
 	})
 
 	t.Run("terminates a reused buffer that was not zeroed", func(t *testing.T) {
-		// The old contract required the caller to zero dst. A recycled scratch
-		// buffer full of leftovers used to leak into the string.
 		dst := []uint16{'X', 'Y', 'Z', 'W', 'V', 'U', 'T', 'S'}
 		if err := toUTF16(dst, "abc"); err != nil {
 			t.Fatal(err)

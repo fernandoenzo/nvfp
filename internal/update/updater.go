@@ -9,8 +9,7 @@ import (
 
 var GamesURL = "https://github.com/fernandoenzo/nvfp/raw/master/games.json"
 
-// FetchGamesJSON downloads the latest games.json from GitHub.
-// Returns the raw JSON bytes or an error if the download fails.
+// FetchGamesJSON downloads games.json from GitHub and returns its raw JSON bytes.
 func FetchGamesJSON() ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, GamesURL, nil)
 	if err != nil {

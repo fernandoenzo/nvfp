@@ -15,7 +15,6 @@ func TestFetchGamesJSON_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Temporarily replace GamesURL
 	originalURL := GamesURL
 	GamesURL = server.URL
 	defer func() { GamesURL = originalURL }()
@@ -46,7 +45,6 @@ func TestFetchGamesJSON_HTTPError(t *testing.T) {
 }
 
 func TestFetchGamesJSON_NetworkError(t *testing.T) {
-	// Use a server that immediately closes connections
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// This handler is never reached because we use a closed server
 	}))

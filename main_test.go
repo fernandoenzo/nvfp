@@ -12,7 +12,6 @@ import (
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
 )
 
-// helper: create a test GameDB with known games
 func newTestGameDB() *db.GameDB {
 	return &db.GameDB{
 		Version: 1,
@@ -24,7 +23,6 @@ func newTestGameDB() *db.GameDB {
 	}
 }
 
-// helper: create a test FingerprintDB from the testdata file
 func newTestFingerprintDB(t *testing.T) *nvidia.FingerprintDB {
 	t.Helper()
 	db, err := nvidia.ParseFingerprintDB(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
@@ -46,7 +44,6 @@ func hasUWPVersion(fp *nvidia.Fingerprint) bool {
 
 func TestFilterGames_All(t *testing.T) {
 	gameDB := newTestGameDB()
-	// No filter → return all games
 	original := gameFilter
 	gameFilter = ""
 	defer func() { gameFilter = original }()
@@ -145,20 +142,16 @@ func TestWritePatch_WritesPatchedDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "fingerprint.db")
 
-	// Write initial DB
 	if err := nvidia.WriteFingerprintDB(fdb, dbPath); err != nil {
 		t.Fatalf("initial WriteFingerprintDB failed: %v", err)
 	}
 
-	// Apply a patch
 	nvidia.PatchGame(fdb, &db.Game{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}})
 
-	// Write the patch
 	if err := writePatch(fdb, dbPath); err != nil {
 		t.Fatalf("writePatch() error: %v", err)
 	}
 
-	// Written file should be parseable
 	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse of written file failed: %v", err)
@@ -175,7 +168,6 @@ func TestWritePatch_WritesPatchedDatabase(t *testing.T) {
 func TestListGames(t *testing.T) {
 	gameDB := newTestGameDB()
 
-	// Capture stdout
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -201,7 +193,6 @@ func TestListGames(t *testing.T) {
 }
 
 func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
-	// Full E2E: parse → patch → write → re-parse → verify
 	fdb := newTestFingerprintDB(t)
 	gameDB := newTestGameDB()
 
@@ -218,7 +209,6 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	// Re-parse
 	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
@@ -232,7 +222,6 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 		t.Error("UWP version not found after round-trip")
 	}
 
-	// Verify original steam version still present
 	var hasSteam bool
 	for _, v := range fp.Versions {
 		if v.Name == "steam" {
@@ -246,7 +235,6 @@ func TestEndToEnd_ParsePatchWriteReparse(t *testing.T) {
 }
 
 func TestDryRun(t *testing.T) {
-	// Verify dryRun flag prevents file writes
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
@@ -261,13 +249,11 @@ func TestDryRun(t *testing.T) {
 		t.Fatalf("WriteFingerprintDB failed: %v", err)
 	}
 
-	// Read original file content
 	originalContent, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatalf("reading original file: %v", err)
 	}
 
-	// Set dry-run flag
 	originalDryRun := dryRun
 	dryRun = true
 	defer func() { dryRun = originalDryRun }()
@@ -280,7 +266,6 @@ func TestDryRun(t *testing.T) {
 		t.Error("patchDB should report modified=true for dry-run of new patch")
 	}
 
-	// File should be unchanged
 	currentContent, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatalf("reading current file: %v", err)
@@ -291,7 +276,6 @@ func TestDryRun(t *testing.T) {
 }
 
 func TestPatchDB_NoChanges(t *testing.T) {
-	// Patching a game that already has UWP → no changes
 	fdb := newTestFingerprintDB(t)
 	gameDB := &db.GameDB{
 		Version: 1,
@@ -344,7 +328,6 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		t.Error("patchDB should report modified=true")
 	}
 
-	// Re-parse and verify
 	db2, err := nvidia.ParseFingerprintDB(dbPath)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
@@ -355,7 +338,6 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		t.Fatal("fingerprint not found")
 	}
 
-	// Find UWP version
 	var uwpVer *nvidia.Version
 	for i := range fp.Versions {
 		if fp.Versions[i].Name == "uwp" {
@@ -367,7 +349,6 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		t.Fatal("UWP version not found")
 	}
 
-	// Check override applied
 	foundCustomDriver := false
 	for _, e := range uwpVer.Elements {
 		if e.ElementName() == "DriverProfile" && e.Content == "custom.exe" {
@@ -378,7 +359,6 @@ func TestPatchDB_WithOverridesAndRemove(t *testing.T) {
 		t.Error("override DriverProfile not applied")
 	}
 
-	// Check removal applied
 	for _, e := range uwpVer.Elements {
 		if strings.EqualFold(e.ElementName(), "WhisperModePopsFactor") {
 			t.Error("WhisperModePopsFactor should have been removed")
@@ -989,6 +969,48 @@ func TestSLOverride(t *testing.T) {
 		if !strings.Contains(output, "payload restored from the sibling bundle") {
 			t.Errorf("the report does not name the payload copy:\n%s", output)
 		}
+		if strings.Contains(output, "backup:") {
+			t.Errorf("copy-only repair reported a manifest backup:\n%s", output)
+		}
+	})
+
+	t.Run("missing other-architecture payload is reported accurately", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixtureFile(t, root, "nvngx_config.txt", "[sl_sdk_0]\r\n")
+		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
+			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
+		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/160_E658700.dll", "other-arch")
+		withNGXRoot(t, root, false)
+
+		stdout, stderr := captureOutput(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+		})
+		if !strings.Contains(stdout, "no repairable changes") || strings.Contains(stdout, "present and current") {
+			t.Errorf("result does not explain that repair was skipped:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "no compatible-architecture payload") || strings.Contains(stderr, "not been published") {
+			t.Errorf("warning misstates the other-architecture payload:\n%s", stderr)
+		}
+	})
+
+	t.Run("no Streamline bundle does not claim every section is current", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixtureFile(t, root, "nvngx_config.txt", "[sl_sdk_0]\r\napp_E658703 = 2.14.0")
+		withNGXRoot(t, root, false)
+
+		stdout, stderr := captureOutput(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "no Streamline") {
+			t.Errorf("missing-cache warning not reported: %s", stderr)
+		}
+		if !strings.Contains(stdout, "review the warnings") || strings.Contains(stdout, "present and current") {
+			t.Errorf("result implies the uninspected cache is current:\n%s", stdout)
+		}
 	})
 
 	// The whole repair in one run: a comment, a per-feature section pinning an
@@ -1043,21 +1065,47 @@ func TestSLOverride(t *testing.T) {
 	})
 }
 
-// captureStdout runs fn with stdout redirected and returns what it printed.
 func captureStdout(t *testing.T, fn func()) string {
+	stdout, _ := captureOutput(t, fn)
+	return stdout
+}
+
+func captureOutput(t *testing.T, fn func()) (string, string) {
 	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	outR, outW, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
+		t.Fatalf("creating stdout pipe: %v", err)
 	}
-	os.Stdout = w
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		outR.Close()
+		outW.Close()
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stdout, os.Stderr = outW, errW
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		outW.Close()
+		errW.Close()
+		outR.Close()
+		errR.Close()
+	}()
+
 	fn()
-	w.Close()
-	os.Stdout = old
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatalf("reading captured stdout: %v", err)
+	if err := outW.Close(); err != nil {
+		t.Fatalf("closing stdout pipe: %v", err)
 	}
-	return buf.String()
+	if err := errW.Close(); err != nil {
+		t.Fatalf("closing stderr pipe: %v", err)
+	}
+	os.Stdout, os.Stderr = oldStdout, oldStderr
+	var stdout, stderr bytes.Buffer
+	if _, err := stdout.ReadFrom(outR); err != nil {
+		t.Fatalf("reading stdout pipe: %v", err)
+	}
+	if _, err := stderr.ReadFrom(errR); err != nil {
+		t.Fatalf("reading stderr pipe: %v", err)
+	}
+	return stdout.String(), stderr.String()
 }

@@ -16,15 +16,9 @@ import (
 // errElevationCancelled reports that the user dismissed the UAC prompt.
 var errElevationCancelled = errors.New("elevation cancelled")
 
-// isElevated reports whether the current process runs with an elevated token.
-// Writing the driver profile database requires administrator privileges. The
-// token is opened explicitly with TOKEN_QUERY — the access this needs — instead
-// of the deprecated OpenCurrentProcessToken helper, and it delegates to x/sys's
-// Token.IsElevated, the well-tested implementation: a hand-rolled version that
-// passed a null ReturnLength to GetTokenInformation failed with
-// ERROR_INVALID_PARAMETER and silently reported every process as unelevated, so
-// the driver step was always skipped. The token query is not silent either way:
-// a failure to open the token is reported instead of read as "not an admin".
+// isElevated reports whether the process token is elevated. It requests only
+// TOKEN_QUERY, uses x/sys' checked implementation, and returns query errors
+// instead of silently treating the process as unelevated.
 func isElevated() (bool, error) {
 	var token windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
@@ -67,11 +61,7 @@ var (
 	_ [unsafe.Offsetof(shellExecuteInfoW{}.hProcess) - 104]struct{}    = [0]struct{}{}
 )
 
-// shell32.dll lives in Windows\System32, so the system-only variant is used,
-// as in internal/nvdr for nvapi64.dll: it restricts the search to that
-// directory instead of walking the normal search order. shell32.dll happens to
-// sit in the stdlib's internal system-DLL allowlist, but syscall.LoadDLL still
-// points at x/sys as the supported way to load a system DLL.
+// Load shell32.dll from System32 to prevent DLL search-order hijacking.
 var (
 	modShell32          = windows.NewLazySystemDLL("shell32.dll")
 	procShellExecuteExW = modShell32.NewProc("ShellExecuteExW")

@@ -1,11 +1,7 @@
 package ngx
 
-// This file is the only place in the package that knows the manifest's format:
-// line endings, and which lines can be rewritten. A rewrite is safe because a
-// line the parser does not recognise is kept verbatim, and a recognised line
-// keeps the exact text that preceded its value — editing one key never
-// reformats the others. The manifest is UTF-8 text, which NVIDIA has always
-// written, and the output is canonical: UTF-8, CRLF, every line terminated.
+// This file owns manifest parsing and serialization. It preserves opaque lines
+// and edited-value prefixes while emitting canonical CRLF UTF-8.
 
 import (
 	"bytes"
@@ -13,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // manifest is a parsed nvngx_config.txt.
@@ -44,8 +41,8 @@ type line struct {
 	raw    string // the line as read, for opaque lines
 }
 
-// parseManifest decodes a manifest and splits it into blocks and lines. It
-// never fails on content: lines it does not recognise are preserved verbatim.
+// parseManifest decodes UTF-8 text and preserves lines it does not recognise.
+// Invalid UTF-8 and NUL bytes are rejected.
 func parseManifest(data []byte) (*manifest, error) {
 	text, err := decode(data)
 	if err != nil {
@@ -220,14 +217,14 @@ func parseLine(text string) line {
 	return line{key: key, prefix: text[:i+1+spaces], value: rest[spaces:]}
 }
 
-// decode reads the input as UTF-8 text, stripping a BOM when present. A BOM is
-// not restored on write: bytes() always emits canonical UTF-8 without one. NUL
-// bytes mean the file is not the text the interposer reads, so they are
-// refused rather than guessed.
+// decode validates UTF-8, strips a leading BOM, and rejects NUL bytes.
 func decode(data []byte) (string, error) {
 	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	if !utf8.Valid(data) {
+		return "", errors.New("manifest is not valid UTF-8")
+	}
 	if bytes.IndexByte(data, 0) >= 0 {
-		return "", errors.New("manifest contains NUL bytes; not a UTF-8 text file")
+		return "", errors.New("manifest contains NUL bytes")
 	}
 	return string(data), nil
 }

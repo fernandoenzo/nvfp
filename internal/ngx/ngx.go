@@ -1,21 +1,6 @@
-// Package ngx maintains the NGX OTA manifest the Streamline interposer reads.
-//
-// The NVIDIA App's bootstrap can rewrite nvngx_config.txt and leave only the
-// bundle sections, dropping the per-feature [sl_<feat>_0] and
-// [sl_<feat>_override_0] ones. The interposer resolves plugins per feature, so
-// once those sections are gone both of its passes fail and the game falls back
-// to its bundled plugins. Inspect and Apply rebuild them from the bundles' own
-// package configs, correct a section that pins a version the cache no longer
-// has, fill a payload that exists under only one hash from its sibling bundle,
-// and are idempotent: a repaired manifest is never touched again.
-//
-// Nothing about the bundles is hard-coded: a Streamline bundle is any
-// <dir>/versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt under the
-// root whose rows name sl_ features, and its arch and app hash come from that
-// directory name. A bundle holding several configs contributes the one under
-// the highest numeric OTA directory. A feature name is taken once, from the
-// first bundle (in bundle-name order) that names it. The manifest's own format
-// lives in one place: manifest.go.
+// Package ngx repairs Streamline's NGX OTA manifest and restores missing
+// payloads from matching-architecture sibling features. It preserves unowned
+// manifest text while updating per-feature sections.
 package ngx
 
 import (
@@ -52,7 +37,7 @@ type Plan struct {
 	Additions []Section // sections the manifest lacks
 	Updates   []Section // sections pinning a version the bundle no longer ships
 	Copies    []Copy    // payloads missing under a hash, filled from the sibling
-	Missing   []string  // features with no payload in the cache
+	Missing   []string  // features missing a payload for their discovered architecture
 	Warnings  []string  // bundles that could not be examined
 
 	doc *manifest // parsed manifest, mutated by Apply
@@ -104,9 +89,8 @@ func Inspect(root string) (*Plan, error) {
 	return plan, nil
 }
 
-// add records one feature: the payload copy it needs when its file is missing,
-// and the manifest entry it needs (an appended section, a corrected version, or
-// none). A feature whose payload exists nowhere is reported, never guessed.
+// add plans the same-architecture payload copy and manifest change for one
+// feature. Missing records features with no compatible payload.
 func (p *Plan) add(feat feature) {
 	dest := payloadPath(p.Root, feat)
 	if !exists(dest) {
@@ -129,12 +113,14 @@ func (p *Plan) add(feat feature) {
 	}
 }
 
-// Apply copies the missing payloads, backs the manifest up once, then rewrites
-// it: new sections appended, outdated versions corrected in place. A plan with
-// nothing to do writes nothing.
+// Apply copies missing payloads, then backs up and updates the manifest when
+// sections need adding or correction. Reusing a plan does not duplicate sections.
 func Apply(plan *Plan) error {
 	for _, copy := range plan.Copies {
-		if err := os.MkdirAll(filepath.Dir(copy.Dest), 0o755); err != nil {
+		if exists(copy.Dest) {
+			continue
+		}
+		if err := fsutil.MkdirAllSync(filepath.Dir(copy.Dest), 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", filepath.Dir(copy.Dest), err)
 		}
 		if err := fsutil.CopyFile(copy.Source, copy.Dest); err != nil {
@@ -145,7 +131,7 @@ func Apply(plan *Plan) error {
 		return nil
 	}
 	// The .bak is written the first time the manifest is modified and never
-	// overwritten, so it keeps the oldest copy, as the original script did.
+	// overwritten, so it keeps the oldest copy.
 	if !exists(plan.Backup) {
 		if err := fsutil.CopyFile(plan.Manifest, plan.Backup); err != nil {
 			return fmt.Errorf("backing up %s: %w", plan.Manifest, err)
@@ -154,10 +140,9 @@ func Apply(plan *Plan) error {
 	return writeManifest(plan)
 }
 
-// writeManifest applies the plan's section changes to the parsed manifest and
-// writes it back whole. Only the sections the plan owns are touched: the rest
-// of the file, recognised or not, keeps its bytes. Each section is re-checked
-// against the document before appending, so a reused plan cannot duplicate it.
+// writeManifest applies the plan's section changes and atomically replaces the
+// manifest. Each section is re-checked before appending, so a reused plan cannot
+// duplicate it.
 func writeManifest(plan *Plan) error {
 	for _, section := range plan.Updates {
 		if b := plan.doc.section(section.Feature); b != nil {
@@ -187,9 +172,8 @@ type config struct {
 	path   string
 }
 
-// discover finds every Streamline bundle in the cache and returns its features,
-// one per feature name, in bundle-name order, plus a warning per selected
-// config whose content could not be read.
+// discover selects each feature once in bundle-name order and returns warnings
+// for malformed Streamline paths and unreadable selected configs.
 func discover(root string) ([]feature, []string) {
 	newest, warnings := collectConfigs(root)
 	var (
@@ -215,11 +199,8 @@ func discover(root string) ([]feature, []string) {
 	return features, warnings
 }
 
-// collectConfigs maps every bundle directory to its config under the highest
-// numeric OTA directory, skipping — and warning about — every config whose
-// directory name carries no <arch>_<hash>, so a malformed newer directory
-// never shadows the valid configs beneath it. A tie between two identical OTA
-// versions is broken by path so the choice does not depend on walk order.
+// collectConfigs keeps each bundle's highest-OTA config, breaking ties by path.
+// It warns about malformed paths only when their files contain Streamline rows.
 func collectConfigs(root string) (map[string]config, []string) {
 	newest := map[string]config{} // bundle dir -> its newest well-formed config
 	var warnings []string
@@ -291,9 +272,7 @@ type feature struct {
 	hash    string // app hash from the config directory, e.g. E658703
 }
 
-// featureLine matches a Streamline feature row and its three fields:
-//
-//	sl_common_override_0, 2.14.0, .dll, sl.common.dll
+// featureLine captures the feature name, version and extension prefix.
 var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+\.\d+\.\d+)\s*,\s*(\.[A-Za-z0-9]+)`)
 
 // parseFeature reads one feature row; anything else yields false. The version
@@ -304,7 +283,6 @@ func parseFeature(line string) (feature, bool) {
 	if m == nil {
 		return feature{}, false
 	}
-	// The regexp pins the version to three dot-separated digit runs.
 	parts := strings.Split(m[2], ".")
 	ota := 0
 	for i, part := range parts {

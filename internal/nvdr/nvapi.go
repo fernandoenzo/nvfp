@@ -50,8 +50,8 @@ var (
 	_ [69652 - profileVersion]struct{}      = [0]struct{}{}
 )
 
-// applicationV4 mirrors NVDRS_APPLICATION_V4: a version word, a predefined flag
-// and six 2048-unit unicode strings with a flags word before the command line.
+// applicationV4 mirrors NVDRS_APPLICATION_V4: a version word, a predefined flag,
+// five 2048-unit UTF-16 strings and a flags word before commandLine.
 // Layout for amd64; see the asserts below.
 type applicationV4 struct {
 	version          uint32

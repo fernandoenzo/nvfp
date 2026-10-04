@@ -1,20 +1,18 @@
 package ngx
 
 // This file is the only place in the package that knows the manifest's format:
-// encoding, line endings, which lines can be rewritten. A rewrite is safe
-// because a line the parser does not recognise is kept verbatim, and a
-// recognised line keeps the exact text that preceded its value — editing one
-// key never reformats the others. The output is canonical: UTF-8, CRLF, every
-// line terminated, no BOM.
+// line endings, and which lines can be rewritten. A rewrite is safe because a
+// line the parser does not recognise is kept verbatim, and a recognised line
+// keeps the exact text that preceded its value — editing one key never
+// reformats the others. The manifest is UTF-8 text, which NVIDIA has always
+// written, and the output is canonical: UTF-8, CRLF, every line terminated.
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"unicode/utf16"
 )
 
 // manifest is a parsed nvngx_config.txt.
@@ -44,9 +42,8 @@ type line struct {
 	raw    string // the line as read, for opaque lines
 }
 
-// parseManifest decodes a manifest in any tolerated encoding and splits it into
-// blocks and lines. It never fails on content: lines it does not recognise are
-// preserved verbatim.
+// parseManifest decodes a manifest and splits it into blocks and lines. It
+// never fails on content: lines it does not recognise are preserved verbatim.
 func parseManifest(data []byte) (*manifest, error) {
 	text, err := decode(data)
 	if err != nil {
@@ -219,31 +216,13 @@ func parseLine(text string) line {
 	return line{key: key, prefix: text[:i+1+spaces], value: rest[spaces:]}
 }
 
-// decode normalises the input encoding to a Go string. This and bytes are the
-// only functions that know about encodings.
+// decode reads the input as UTF-8 text, stripping a BOM when present. NUL
+// bytes mean the file is not the text the interposer reads, so they are
+// refused rather than guessed.
 func decode(data []byte) (string, error) {
-	switch {
-	case bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}):
-		return string(data[3:]), nil
-	case bytes.HasPrefix(data, []byte{0xFF, 0xFE}):
-		return decodeUTF16(data[2:], binary.LittleEndian)
-	case bytes.HasPrefix(data, []byte{0xFE, 0xFF}):
-		return decodeUTF16(data[2:], binary.BigEndian)
-	}
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	if bytes.IndexByte(data, 0) >= 0 {
-		return "", errors.New("manifest contains NUL bytes and no UTF-16 BOM; refusing to guess its encoding")
+		return "", errors.New("manifest contains NUL bytes; not a UTF-8 text file")
 	}
 	return string(data), nil
-}
-
-// decodeUTF16 decodes a BOM-less UTF-16 body.
-func decodeUTF16(data []byte, order binary.ByteOrder) (string, error) {
-	if len(data)%2 != 0 {
-		return "", errors.New("UTF-16 manifest has an odd number of bytes")
-	}
-	codes := make([]uint16, 0, len(data)/2)
-	for i := 0; i+1 < len(data); i += 2 {
-		codes = append(codes, order.Uint16(data[i:]))
-	}
-	return string(utf16.Decode(codes)), nil
 }

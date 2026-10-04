@@ -116,12 +116,12 @@ the cache may no longer have. The first write copies the manifest to
 `nvngx_config.txt.bak` and that backup is never overwritten.
 
 The manifest is parsed, changed in memory and written back whole, which is what
-makes line endings, encodings and BOMs a non-issue: any input (UTF-8 with or
-without BOM, UTF-16, LF/CRLF/CR) is read, and the output is always UTF-8 with
-CRLF and every line terminated. A line the parser does not recognise — a
-comment, a stray token, odd spacing — is preserved verbatim, and editing one key
-never reformats the others, so the file comes out byte-identical except for the
-entries this command owns.
+makes line endings and a stray BOM a non-issue: UTF-8 input with any line
+ending is read, and the output is always UTF-8 with CRLF and every line
+terminated. A line the parser does not recognise — a comment, a stray token,
+odd spacing — is preserved verbatim, and editing one key never reformats the
+others, so the file comes out byte-identical except for the entries this
+command owns.
 
 It is **idempotent**: run it again and it reports that there is nothing to do
 and writes nothing. It is also purely local: it ignores the games manifest, the

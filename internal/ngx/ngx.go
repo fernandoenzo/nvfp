@@ -10,7 +10,7 @@
 // and are idempotent: a repaired manifest is never touched again.
 //
 // The manifest is parsed, mutated in memory and written back whole, so the
-// format itself (encoding, line endings, section spacing) lives in one place:
+// format itself (line endings, section spacing) lives in one place:
 // manifest.go. Everything the parser does not recognise survives the rewrite
 // byte for byte.
 package ngx

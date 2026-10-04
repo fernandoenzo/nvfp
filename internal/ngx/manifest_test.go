@@ -4,10 +4,8 @@ package ngx
 // that knows the file format.
 
 import (
-	"encoding/binary"
 	"strings"
 	"testing"
-	"unicode/utf16"
 )
 
 // realistic is what NVIDIA writes: CRLF, blank lines between sections, several
@@ -78,15 +76,13 @@ func TestManifestSetInPlaceAndAppend(t *testing.T) {
 	}
 }
 
-func TestManifestDecodesEveryToleratedEncoding(t *testing.T) {
+func TestManifestToleratesUTF8BOMAndLineEndings(t *testing.T) {
 	const want = "[dlss]\r\napp_E658703 = 310.4.0\r\n"
 	inputs := map[string]string{
 		"UTF-8":     "[dlss]\r\napp_E658703 = 310.4.0\r\n",
 		"UTF-8 BOM": "\xEF\xBB\xBF[dlss]\r\napp_E658703 = 310.4.0\r\n",
 		"LF only":   "[dlss]\napp_E658703 = 310.4.0\n",
 		"CR only":   "[dlss]\rapp_E658703 = 310.4.0\r",
-		"UTF-16LE":  "\xFF\xFE" + string(encodeUTF16(want, binary.LittleEndian)),
-		"UTF-16BE":  "\xFE\xFF" + string(encodeUTF16(want, binary.BigEndian)),
 	}
 	for name, input := range inputs {
 		doc, err := parseManifest([]byte(input))
@@ -104,9 +100,11 @@ func TestManifestDecodesEveryToleratedEncoding(t *testing.T) {
 	}
 }
 
-func TestManifestRefusesNULWithoutBOM(t *testing.T) {
+// A file with NUL bytes is not the UTF-8 text the interposer reads: it must be
+// refused, never guessed.
+func TestManifestRefusesNonUTF8(t *testing.T) {
 	if _, err := parseManifest([]byte("[dlss]\x00\x00garbage")); err == nil {
-		t.Error("a NUL-filled file with no BOM must be refused, not guessed")
+		t.Error("a NUL-filled file must be refused, not guessed")
 	}
 }
 
@@ -127,18 +125,4 @@ func TestSectionHeaderTolerance(t *testing.T) {
 			t.Errorf("sectionHeader(%q) should not match", line)
 		}
 	}
-}
-
-// encodeUTF16 encodes s as UTF-16 in the given byte order, without a BOM.
-func encodeUTF16(s string, order binary.ByteOrder) []byte {
-	codes := utf16.Encode([]rune(s))
-	out := make([]byte, 0, len(codes)*2)
-	for _, code := range codes {
-		if order == binary.BigEndian {
-			out = binary.BigEndian.AppendUint16(out, code)
-			continue
-		}
-		out = binary.LittleEndian.AppendUint16(out, code)
-	}
-	return out
 }

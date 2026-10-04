@@ -32,7 +32,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fernandoenzo/nvfp/internal/nvidia"
+	"github.com/fernandoenzo/nvfp/internal/fsutil"
 	"github.com/fernandoenzo/set"
 )
 
@@ -140,7 +140,7 @@ func Apply(plan *Plan) error {
 		if err := os.MkdirAll(filepath.Dir(copy.Dest), 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", filepath.Dir(copy.Dest), err)
 		}
-		if err := nvidia.CopyFile(copy.Source, copy.Dest); err != nil {
+		if err := fsutil.CopyFile(copy.Source, copy.Dest); err != nil {
 			return fmt.Errorf("copying %s: %w", copy.Dest, err)
 		}
 	}
@@ -150,7 +150,7 @@ func Apply(plan *Plan) error {
 	// The .bak is written the first time the manifest is modified and never
 	// overwritten, so it keeps the oldest copy, as the original script did.
 	if !exists(plan.Backup) {
-		if err := nvidia.CopyFile(plan.Manifest, plan.Backup); err != nil {
+		if err := fsutil.CopyFile(plan.Manifest, plan.Backup); err != nil {
 			return fmt.Errorf("backing up %s: %w", plan.Manifest, err)
 		}
 	}

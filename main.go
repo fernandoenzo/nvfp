@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/nvfp/internal/fsutil"
 	"github.com/fernandoenzo/nvfp/internal/ngx"
 	"github.com/fernandoenzo/nvfp/internal/nvdr"
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
@@ -172,7 +173,7 @@ func restoreDB() error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
 	}
-	if err := nvidia.CopyFile(src, dst); err != nil {
+	if err := fsutil.CopyFile(src, dst); err != nil {
 		return fmt.Errorf("restoring %s: %w", dst, err)
 	}
 	fmt.Printf("Restored %s\n  from %s\n", dst, src)

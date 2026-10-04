@@ -3,7 +3,6 @@ package nvidia
 import (
 	"encoding/xml"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"slices"
@@ -120,30 +119,6 @@ func WriteFingerprintDB(db *FingerprintDB, path string) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
-	return nil
-}
-
-// CopyFile copies src over dst, overwriting dst if it exists. Unlike a backup,
-// the destination is intentionally replaced: the caller is restoring a file.
-func CopyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", src, err)
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("creating %s: %w", dst, err)
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
-	}
-	if err := out.Sync(); err != nil {
-		return fmt.Errorf("syncing %s: %w", dst, err)
-	}
 	return nil
 }
 

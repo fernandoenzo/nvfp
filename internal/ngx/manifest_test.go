@@ -112,7 +112,6 @@ func TestSectionHeaderTolerance(t *testing.T) {
 	for line, want := range map[string]string{
 		"[dlss]":          "dlss",
 		"  [dlss]  ":      "dlss",
-		"\uFEFF[dlss]":    "dlss",
 		"[force_add_upd]": "force_add_upd",
 	} {
 		got, ok := sectionHeader(line)

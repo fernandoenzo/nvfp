@@ -182,10 +182,10 @@ func (b *block) set(key, value string) bool {
 	return true
 }
 
-// sectionHeader recognises [name], tolerating surrounding whitespace and a
-// stripped BOM. Anything else is not a header.
+// sectionHeader recognises [name], tolerating surrounding whitespace; decode
+// has already stripped the file-level BOM. Anything else is not a header.
 func sectionHeader(text string) (string, bool) {
-	trimmed := strings.TrimPrefix(strings.TrimSpace(text), "\uFEFF")
+	trimmed := strings.TrimSpace(text)
 	if len(trimmed) < 3 || trimmed[0] != '[' || trimmed[len(trimmed)-1] != ']' {
 		return "", false
 	}

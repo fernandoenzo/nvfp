@@ -136,7 +136,7 @@ what it would change.
 
 The cache directory is `OTACachePath` from
 `HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to
-`C:\ProgramData\NVIDIA\NGX\models`. Features with no payload in either bundle
+`C:\ProgramData\NVIDIA\NGX\models`. Features with no payload in any bundle
 (NVIDIA does not publish every plugin) are reported and skipped. Run it **after
 the NVIDIA App has started** — its bootstrap rewrites the manifest — and before
 launching the game; re-run it after every driver or NVIDIA App update.

@@ -284,7 +284,7 @@ func warnMissingFeatures(plan *ngx.Plan) {
 	if len(plan.Missing) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Warning: no payload in either bundle for: %v\n", plan.Missing)
+	fmt.Fprintf(os.Stderr, "Warning: no payload in any bundle for: %v\n", plan.Missing)
 	fmt.Fprintln(os.Stderr, "These are not in the NGX cache: NVIDIA has not published them, so they are skipped.")
 }
 

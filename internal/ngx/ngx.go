@@ -55,7 +55,7 @@ type Plan struct {
 	Additions []Section // sections the manifest lacks
 	Updates   []Section // sections pinning a version the bundle no longer ships
 	Copies    []Copy    // payloads missing under a hash, filled from the sibling
-	Missing   []string  // features with no payload in either family
+	Missing   []string  // features with no payload in their bundle or the sibling
 	Warnings  []string  // bundles that could not be examined
 
 	doc *manifest // parsed manifest, mutated by Apply
@@ -102,7 +102,7 @@ func Inspect(root string) (*Plan, error) {
 			"%s: no Streamline (sl_) bundle found; open the NVIDIA App once to populate its cache", root))
 	}
 	for _, feat := range features {
-		plan.add(root, feat)
+		plan.add(feat)
 	}
 	return plan, nil
 }
@@ -110,10 +110,10 @@ func Inspect(root string) (*Plan, error) {
 // add records one feature: a payload copy when its file is missing, and the
 // manifest entry it needs: an appended section, a corrected version, or
 // nothing when the manifest is already current.
-func (p *Plan) add(root string, feat feature) {
-	dest := payloadPath(root, feat)
+func (p *Plan) add(feat feature) {
+	dest := payloadPath(p.Root, feat)
 	if !exists(dest) {
-		source, ok := siblingPayload(root, feat)
+		source, ok := siblingPayload(p.Root, feat)
 		if !ok {
 			p.Missing = append(p.Missing, feat.name)
 			return
@@ -341,8 +341,8 @@ func payloadPath(root string, feat feature) string {
 	return filepath.Join(root, feat.name, versionsDir, strconv.Itoa(feat.ota), filesDir, file)
 }
 
-// siblingPayload finds the same payload under the sibling family's hash: both
-// bundles ship identical bytes, so one fills the other's missing file. The
+// siblingPayload finds the same payload under the sibling feature's directory:
+// both bundles ship identical bytes, so one fills the other's missing file. The
 // sibling payload is matched by feature name and extension, never by a
 // hard-coded hash; the first match in sorted order wins.
 func siblingPayload(root string, feat feature) (string, bool) {

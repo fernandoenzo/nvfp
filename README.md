@@ -88,8 +88,8 @@ Read-only and privilege-free: it asks the driver how each game's profile would r
 ```
 NGX OTA manifest: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt
   ✓ sl_common_0 payload restored from the sibling bundle
-  ✓ added [sl_common_0]  app_E658703 = 2.14.0
-  ✓ added [sl_common_override_0]  app_E658700 = 2.14.0
+  ✓ added [sl_reflex_0]  app_E658703 = 2.14.3
+  ✓ updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3
   backup: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt.bak
 ```
 
@@ -108,9 +108,20 @@ Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loa
 
 `--sl-override` rebuilds them. It reads the authoritative feature list from both
 bundles' own `nvngx_package_config.txt`, restores a payload that exists under
-only one hash from the sibling bundle (identical bytes), and appends the missing
-`[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections. The first write copies the
-manifest to `nvngx_config.txt.bak` and that backup is never overwritten.
+only one hash from the sibling bundle (identical bytes), appends the missing
+`[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a section
+that pins an outdated version** — the interposer resolves a feature to
+`versions\<ota>`, so leaving a stale version in place points it at a directory
+the cache may no longer have. The first write copies the manifest to
+`nvngx_config.txt.bak` and that backup is never overwritten.
+
+The manifest is parsed, changed in memory and written back whole, which is what
+makes line endings, encodings and BOMs a non-issue: any input (UTF-8 with or
+without BOM, UTF-16, LF/CRLF/CR) is read, and the output is always UTF-8 with
+CRLF and every line terminated. A line the parser does not recognise — a
+comment, a stray token, odd spacing — is preserved verbatim, and editing one key
+never reformats the others, so the file comes out byte-identical except for the
+entries this command owns.
 
 It is **idempotent**: run it again and it reports that there is nothing to do
 and writes nothing. It is also purely local: it ignores the games manifest, the

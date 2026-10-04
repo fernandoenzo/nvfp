@@ -980,3 +980,68 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	return buf.String()
 }
+
+// TestSLOverrideStaleAndMissing covers the whole repair in one run: a manifest
+// with a comment, a per-feature section pinning an outdated version, sections
+// missing entirely, and payloads missing under one hash. It is also the
+// regression test for the stale-version gap inherited from the PowerShell.
+func TestSLOverrideStaleAndMissing(t *testing.T) {
+	root := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("nvngx_config.txt",
+		"; NVIDIA NGX OTA cache\r\n"+
+			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n"+
+			"[sl_common_0]\r\napp_E658703=2.14.0\r\n")
+	writeFile("sl_sdk_0/versions/1/nvngx_package_config.txt",
+		"sl_common_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_0, 2.14.3, .dll, sl.reflex.dll\n")
+	writeFile("sl_sdk_override_0/versions/1/nvngx_package_config.txt",
+		"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
+	writeFile("sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
+	writeFile("sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")
+
+	oldRoot, oldFlag, oldDry := ngxRoot, slOverrideFlag, dryRun
+	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
+	ngxRoot = func() (string, error) { return root, nil }
+	slOverrideFlag, dryRun = true, false
+
+	output := captureStdout(t, func() {
+		if err := run(nil, nil); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+	got, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	// The comment survives, the stale section is corrected keeping its `=`
+	// spacing, and the missing sections are appended blank-line separated.
+	want := "; NVIDIA NGX OTA cache\r\n" +
+		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n" +
+		"[sl_common_0]\r\napp_E658703=2.14.3\r\n\r\n" +
+		"[sl_reflex_0]\r\napp_E658703 = 2.14.3\r\n\r\n" +
+		"[sl_common_override_0]\r\napp_E658700 = 2.14.3\r\n\r\n" +
+		"[sl_reflex_override_0]\r\napp_E658700 = 2.14.3\r\n"
+	if string(got) != want {
+		t.Errorf("manifest mismatch\n got %q\nwant %q", got, want)
+	}
+	if !strings.Contains(output, "updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3") {
+		t.Errorf("output does not report the version correction:\n%s", output)
+	}
+	for _, payload := range []string{
+		"sl_common_0/versions/134659/files/1B0_E658703.dll",
+		"sl_reflex_0/versions/134659/files/1B0_E658703.dll",
+	} {
+		if _, err := os.Stat(filepath.Join(root, payload)); err != nil {
+			t.Errorf("payload not filled from the sibling: %s: %v", payload, err)
+		}
+	}
+}

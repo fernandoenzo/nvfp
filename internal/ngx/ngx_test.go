@@ -72,8 +72,8 @@ func TestInspectFindsMissingSections(t *testing.T) {
 			t.Errorf("copy source %s should come from the override family", copy.Source)
 		}
 	}
-	if got := len(plan.Pending()); got != 4 {
-		t.Fatalf("pending = %d, want 4", got)
+	if got := len(plan.Additions()); got != 4 {
+		t.Fatalf("additions = %d, want 4", got)
 	}
 	if !plan.Changed() {
 		t.Error("Changed() = false, want true")
@@ -108,8 +108,8 @@ func TestInspectSkipsSectionsAlreadyPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if len(plan.Pending()) != 0 {
-		t.Errorf("pending = %v, want none", plan.Pending())
+	if got := plan.Additions(); len(got) != 0 {
+		t.Errorf("additions = %v, want none", got)
 	}
 	if plan.Changed() {
 		t.Error("Changed() = true, want false")
@@ -178,8 +178,8 @@ func TestApplyAppendsSectionsAndBacksUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading manifest: %v", err)
 	}
-	if !strings.Contains(string(manifest), "\r\n[sl_common_0]\r\napp_E658703 = 2.14.0") {
-		t.Errorf("manifest = %q, want the appended CRLF section", manifest)
+	if !strings.Contains(string(manifest), "\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0") {
+		t.Errorf("manifest = %q, want the appended section, blank-line separated", manifest)
 	}
 }
 
@@ -205,7 +205,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 		t.Fatalf("second Inspect: %v", err)
 	}
 	if second.Changed() {
-		t.Errorf("second plan still has work: %d copies, %d pending", len(second.Copies), len(second.Pending()))
+		t.Errorf("second plan still has work: %d copies, %d additions", len(second.Copies), len(second.Additions()))
 	}
 	if err := Apply(second); err != nil {
 		t.Fatalf("second Apply: %v", err)
@@ -334,5 +334,119 @@ func TestNewestPackageConfigPicksHighestPath(t *testing.T) {
 	}
 	if !strings.Contains(got, filepath.Join("versions", "2")) {
 		t.Errorf("newestPackageConfig = %s, want the versions/2 copy", got)
+	}
+}
+
+// --- Stale versions (the manifest pinning a version the cache no longer has) ---
+
+func TestInspectDetectsStaleVersion(t *testing.T) {
+	root := cacheFixture(t,
+		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0",
+		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
+		[]string{payload("sl_common_0", "E658703", "134659")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	updates := plan.Updates()
+	if len(updates) != 1 {
+		t.Fatalf("updates = %+v, want one stale section", updates)
+	}
+	if updates[0].Feature != "sl_common_0" || updates[0].Current != "2.14.0" || updates[0].Version != "2.14.3" {
+		t.Errorf("update = %+v, want sl_common_0 2.14.0 -> 2.14.3", updates[0])
+	}
+	if got := len(plan.Additions()); got != 0 {
+		t.Errorf("additions = %d, want 0: the section exists", got)
+	}
+	if !plan.Changed() {
+		t.Error("Changed() = false, want true: a stale version must be corrected")
+	}
+}
+
+func TestApplyCorrectsStaleVersionInPlace(t *testing.T) {
+	initial := "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0"
+	root := cacheFixture(t, initial,
+		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
+		[]string{payload("sl_common_0", "E658703", "134659")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	manifest, err := os.ReadFile(plan.Manifest)
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	// The version is updated in place and every other byte is untouched.
+	want := "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.3\r\n"
+	if string(manifest) != want {
+		t.Errorf("manifest = %q, want %q", manifest, want)
+	}
+	// A second run has nothing to do.
+	second, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("second Inspect: %v", err)
+	}
+	if second.Changed() {
+		t.Errorf("second run still has work: updates=%+v", second.Updates())
+	}
+}
+
+func TestApplyCorrectsStaleVersionKeepingLineStyle(t *testing.T) {
+	// No spaces around `=`, and an opaque comment above the section.
+	initial := "; NVIDIA cache\r\n[sl_common_0]\r\napp_E658703=2.14.0\r\n"
+	root := cacheFixture(t, initial,
+		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
+		[]string{payload("sl_common_0", "E658703", "134659")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	manifest, err := os.ReadFile(plan.Manifest)
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	want := "; NVIDIA cache\r\n[sl_common_0]\r\napp_E658703=2.14.3\r\n"
+	if string(manifest) != want {
+		t.Errorf("manifest = %q, want %q (comment kept, spacing kept)", manifest, want)
+	}
+}
+
+func TestCurrentVersionIsNotTouched(t *testing.T) {
+	initial := "[sl_common_0]\r\napp_E658703 = 2.14.3\r\n"
+	root := cacheFixture(t, initial,
+		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
+		[]string{payload("sl_common_0", "E658703", "134659")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(plan.Updates()) != 0 {
+		t.Errorf("updates = %+v, want none", plan.Updates())
+	}
+	if plan.Changed() {
+		t.Error("Changed() = true, want false")
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	manifest, err := os.ReadFile(plan.Manifest)
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	if string(manifest) != initial {
+		t.Errorf("manifest = %q, want it untouched", manifest)
+	}
+	if _, err := os.Stat(plan.Backup); !os.IsNotExist(err) {
+		t.Errorf("a backup appeared for an unchanged manifest: %v", err)
 	}
 }

@@ -5,8 +5,14 @@
 // [sl_<feat>_override_0] ones. The interposer resolves plugins per feature, so
 // both of its passes then fail and the game falls back to its bundled plugins.
 // Inspect and Apply rebuild those sections from the two bundles' own package
-// configs, filling a payload that exists under only one hash from its sibling
-// bundle, and are idempotent: a repaired manifest is never touched again.
+// configs, correct a section that still points at a version the cache no longer
+// has, fill a payload that exists under only one hash from its sibling bundle,
+// and are idempotent: a repaired manifest is never touched again.
+//
+// The manifest is parsed, mutated in memory and written back whole, so the
+// format itself (encoding, line endings, section spacing) lives in one place:
+// manifest.go. Everything the parser does not recognise survives the rewrite
+// byte for byte.
 package ngx
 
 import (
@@ -46,7 +52,7 @@ var families = []family{
 	{bundle: "sl_sdk_override_0", hash: "E658700", other: "E658703"},
 }
 
-// Plan is what the NGX cache on disk is missing.
+// Plan is what applying the repair to the NGX cache would do.
 type Plan struct {
 	Root     string    // NGX OTA cache directory
 	Manifest string    // nvngx_config.txt inside Root
@@ -55,13 +61,16 @@ type Plan struct {
 	Copies   []Copy    // payloads missing under a hash, filled from the sibling
 	Missing  []string  // features with no payload in either family
 	Warnings []string  // bundles that could not be examined
+
+	doc *manifest // parsed manifest, mutated by Apply
 }
 
-// Section is one per-feature manifest entry.
+// Section is one per-feature manifest entry and what the manifest says about it.
 type Section struct {
 	Feature string // e.g. sl_common_override_0
 	Hash    string // app hash of its family
-	Version string // e.g. 2.14.0
+	Version string // version the bundle ships now
+	Current string // version the manifest declares, empty when absent
 	Present bool   // the manifest already carries [Feature]
 }
 
@@ -72,36 +81,55 @@ type Copy struct {
 	Dest    string
 }
 
-// Pending returns the sections the manifest is missing.
-func (p *Plan) Pending() []Section {
-	var pending []Section
+// Stale reports whether the manifest pins a version other than the one the
+// bundle ships, which is what makes the interposer miss the payload.
+func (s Section) Stale() bool {
+	return s.Present && s.Current != s.Version
+}
+
+// Additions returns the sections the manifest does not have yet.
+func (p *Plan) Additions() []Section {
+	var out []Section
 	for _, section := range p.Sections {
 		if !section.Present {
-			pending = append(pending, section)
+			out = append(out, section)
 		}
 	}
-	return pending
+	return out
+}
+
+// Updates returns the sections whose declared version is no longer the one the
+// bundle ships. The interposer resolves a feature to versions\<ota>, so a stale
+// version points at a directory the cache may have deleted.
+func (p *Plan) Updates() []Section {
+	var out []Section
+	for _, section := range p.Sections {
+		if section.Stale() {
+			out = append(out, section)
+		}
+	}
+	return out
 }
 
 // Changed reports whether applying the plan would touch any file.
 func (p *Plan) Changed() bool {
-	return len(p.Copies) > 0 || len(p.Pending()) > 0
+	return len(p.Copies) > 0 || len(p.Additions()) > 0 || len(p.Updates()) > 0
 }
 
 // Inspect reads the NGX cache under root and reports every section and payload
-// it is missing. Nothing is written.
+// it is missing or pointing at an outdated version. Nothing is written.
 func Inspect(root string) (*Plan, error) {
-	manifest := filepath.Join(root, manifestName)
-	data, err := os.ReadFile(manifest)
+	path := filepath.Join(root, manifestName)
+	doc, err := parseFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", manifest, err)
+		return nil, err
 	}
 	plan := &Plan{
 		Root:     root,
-		Manifest: manifest,
-		Backup:   manifest + ".bak",
+		Manifest: path,
+		Backup:   path + ".bak",
+		doc:      doc,
 	}
-	text := string(data)
 	queued := map[string]bool{}
 	for _, fam := range families {
 		features, err := familyFeatures(filepath.Join(root, fam.bundle))
@@ -110,15 +138,15 @@ func Inspect(root string) (*Plan, error) {
 			continue
 		}
 		for _, feat := range features {
-			plan.add(fam, feat, text, queued)
+			plan.add(fam, feat, queued)
 		}
 	}
 	return plan, nil
 }
 
 // add records one feature: a payload copy when its file is missing, and the
-// manifest section it needs, unless the manifest (or this plan) already has it.
-func (p *Plan) add(fam family, feat feature, manifest string, queued map[string]bool) {
+// manifest entry it needs unless the plan already handled that feature.
+func (p *Plan) add(fam family, feat feature, queued map[string]bool) {
 	if queued[feat.name] {
 		return
 	}
@@ -132,31 +160,53 @@ func (p *Plan) add(fam family, feat feature, manifest string, queued map[string]
 		}
 		p.Copies = append(p.Copies, Copy{Feature: feat.name, Source: source, Dest: dest})
 	}
-	p.Sections = append(p.Sections, Section{
+	section := Section{
 		Feature: feat.name,
 		Hash:    fam.hash,
 		Version: feat.version,
-		Present: hasSection(manifest, feat.name),
-	})
+	}
+	if b := p.doc.section(feat.name); b != nil {
+		section.Present = true
+		section.Current, _ = b.get("app_" + fam.hash)
+	}
+	p.Sections = append(p.Sections, section)
 }
 
-// Apply copies the missing payloads, backs the manifest up once and appends
-// every pending section. It is idempotent: a plan with nothing to do writes
-// nothing.
+// Apply copies the missing payloads, backs the manifest up once and writes the
+// corrected sections: new ones appended, outdated versions rewritten in place.
+// It is idempotent: a plan with nothing to do writes nothing.
 func Apply(plan *Plan) error {
 	for _, copy := range plan.Copies {
 		if err := copyPayload(copy); err != nil {
 			return err
 		}
 	}
-	pending := plan.Pending()
-	if len(pending) == 0 {
+	if len(plan.Additions()) == 0 && len(plan.Updates()) == 0 {
 		return nil
 	}
 	if err := backupOnce(plan.Manifest, plan.Backup); err != nil {
 		return err
 	}
-	return appendSections(plan.Manifest, pending)
+	return writeManifest(plan)
+}
+
+// writeManifest applies the plan's section changes to the parsed manifest and
+// writes it back whole. Only the sections the plan owns are touched: the rest
+// of the file, recognised or not, keeps its bytes.
+func writeManifest(plan *Plan) error {
+	for _, section := range plan.Updates() {
+		if b := plan.doc.section(section.Feature); b != nil {
+			b.set("app_"+section.Hash, section.Version)
+		}
+	}
+	for _, section := range plan.Additions() {
+		b := plan.doc.appendSection(section.Feature)
+		b.set("app_"+section.Hash, section.Version)
+	}
+	if err := os.WriteFile(plan.Manifest, plan.doc.bytes(), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", plan.Manifest, err)
+	}
+	return nil
 }
 
 // copyPayload writes the sibling family's identical payload into the missing
@@ -180,24 +230,6 @@ func backupOnce(manifest, backup string) error {
 	}
 	if err := copyFile(manifest, backup); err != nil {
 		return fmt.Errorf("backing up %s: %w", manifest, err)
-	}
-	return nil
-}
-
-// appendSections appends the sections the way the original script wrote them:
-// CRLF line endings, no trailing newline.
-func appendSections(manifest string, sections []Section) error {
-	var b strings.Builder
-	for _, section := range sections {
-		fmt.Fprintf(&b, "\r\n[%s]\r\napp_%s = %s", section.Feature, section.Hash, section.Version)
-	}
-	file, err := os.OpenFile(manifest, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", manifest, err)
-	}
-	defer file.Close()
-	if _, err := file.WriteString(b.String()); err != nil {
-		return fmt.Errorf("appending to %s: %w", manifest, err)
 	}
 	return nil
 }
@@ -230,7 +262,7 @@ type feature struct {
 // featureLine matches a bundle's feature rows:
 //
 //	sl_common_override_0, 2.14.0, .dll, sl.common.dll
-var featureLine = regexp.MustCompile(`^\s*(sl_[a-z0-9_]+)\s*,\s*(\d+)\.(\d+)\.(\d+)\s*,`)
+var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+)\.(\d+)\.(\d+)\s*,`)
 
 // parseFeature reads one feature row; anything else yields false.
 func parseFeature(line string) (feature, bool) {
@@ -273,6 +305,9 @@ func familyFeatures(bundleDir string) ([]feature, error) {
 		if feat, ok := parseFeature(line); ok {
 			features = append(features, feat)
 		}
+	}
+	if len(features) == 0 {
+		return nil, fmt.Errorf("%s: no feature rows found", path)
 	}
 	return features, nil
 }
@@ -326,17 +361,6 @@ func siblingFeature(name string) string {
 		return strings.TrimSuffix(name, "_override_0") + "_0"
 	}
 	return strings.TrimSuffix(name, "_0") + "_override_0"
-}
-
-// hasSection reports whether the manifest already carries the [feature] line.
-func hasSection(manifest, feature string) bool {
-	header := "[" + feature + "]"
-	for line := range strings.SplitSeq(manifest, "\n") {
-		if strings.HasPrefix(line, header) {
-			return true
-		}
-	}
-	return false
 }
 
 // exists reports whether path is an existing file.

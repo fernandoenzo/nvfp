@@ -245,11 +245,14 @@ func printSLPlan(plan *ngx.Plan) {
 	for _, cp := range plan.Copies {
 		fmt.Printf("  → would copy %s\n        to %s\n", cp.Source, cp.Dest)
 	}
-	for _, section := range plan.Pending() {
+	for _, section := range plan.Additions() {
 		fmt.Printf("  → would add [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
 	}
+	for _, section := range plan.Updates() {
+		fmt.Printf("  → would update [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
+	}
 	if !plan.Changed() {
-		fmt.Println("  ⊘ nothing to do: the manifest already carries every per-feature section")
+		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
 	}
 	warnMissingFeatures(plan)
 }
@@ -261,13 +264,17 @@ func printSLResult(plan *ngx.Plan) {
 	for _, cp := range plan.Copies {
 		fmt.Printf("  ✓ %s payload restored from the sibling bundle\n", cp.Feature)
 	}
-	if pending := plan.Pending(); len(pending) > 0 {
-		for _, section := range pending {
-			fmt.Printf("  ✓ added [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
-		}
-		fmt.Printf("  backup: %s\n", plan.Backup)
+	additions, updates := plan.Additions(), plan.Updates()
+	for _, section := range additions {
+		fmt.Printf("  ✓ added [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
+	}
+	for _, section := range updates {
+		fmt.Printf("  ✓ updated [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
+	}
+	if len(additions) == 0 && len(updates) == 0 {
+		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
 	} else {
-		fmt.Println("  ⊘ nothing to do: the manifest already carries every per-feature section")
+		fmt.Printf("  backup: %s\n", plan.Backup)
 	}
 	warnMissingFeatures(plan)
 }

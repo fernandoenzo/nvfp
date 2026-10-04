@@ -21,8 +21,8 @@
 package ngx
 
 import (
+	"cmp"
 	"fmt"
-	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/fernandoenzo/nvfp/internal/nvidia"
 	"github.com/fernandoenzo/set"
 )
 
@@ -139,7 +140,7 @@ func Apply(plan *Plan) error {
 		if err := os.MkdirAll(filepath.Dir(copy.Dest), 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", filepath.Dir(copy.Dest), err)
 		}
-		if err := copyFile(copy.Source, copy.Dest); err != nil {
+		if err := nvidia.CopyFile(copy.Source, copy.Dest); err != nil {
 			return fmt.Errorf("copying %s: %w", copy.Dest, err)
 		}
 	}
@@ -149,7 +150,7 @@ func Apply(plan *Plan) error {
 	// The .bak is written the first time the manifest is modified and never
 	// overwritten, so it keeps the oldest copy, as the original script did.
 	if !exists(plan.Backup) {
-		if err := copyFile(plan.Manifest, plan.Backup); err != nil {
+		if err := nvidia.CopyFile(plan.Manifest, plan.Backup); err != nil {
 			return fmt.Errorf("backing up %s: %w", plan.Manifest, err)
 		}
 	}
@@ -173,24 +174,6 @@ func writeManifest(plan *Plan) error {
 		return fmt.Errorf("writing %s: %w", plan.Manifest, err)
 	}
 	return nil
-}
-
-// copyFile streams src into dst, reporting a write error.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", src, err)
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("creating %s: %w", dst, err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
-	}
-	return out.Close()
 }
 
 // config is one bundle's package config in the cache layout, with the arch and
@@ -229,7 +212,7 @@ func discover(root string) ([]feature, []string) {
 		seen     = set.New[string](len(newest))
 	)
 	for _, cfg := range slices.SortedFunc(maps.Values(newest), func(a, b config) int {
-		return strings.Compare(a.bundle, b.bundle)
+		return cmp.Compare(a.bundle, b.bundle)
 	}) {
 		if cfg.arch == "" || cfg.hash == "" {
 			warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", cfg.path))
@@ -293,10 +276,10 @@ type feature struct {
 	hash    string // app hash from the config directory, e.g. E658703
 }
 
-// featureLine matches a Streamline feature row and its four fields:
+// featureLine matches a Streamline feature row and its three fields:
 //
 //	sl_common_override_0, 2.14.0, .dll, sl.common.dll
-var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+)\.(\d+)\.(\d+)\s*,\s*(\.[A-Za-z0-9]+)`)
+var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+\.\d+\.\d+)\s*,\s*(\.[A-Za-z0-9]+)`)
 
 // parseFeature reads one feature row; anything else yields false.
 func parseFeature(line string) (feature, bool) {
@@ -304,23 +287,23 @@ func parseFeature(line string) (feature, bool) {
 	if m == nil {
 		return feature{}, false
 	}
-	major, err := strconv.Atoi(m[2])
-	if err != nil {
+	parts := strings.Split(m[2], ".")
+	if len(parts) != 3 {
 		return feature{}, false
 	}
-	minor, err := strconv.Atoi(m[3])
-	if err != nil {
-		return feature{}, false
-	}
-	patch, err := strconv.Atoi(m[4])
-	if err != nil {
-		return feature{}, false
+	ota := 0
+	for _, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n > 0xFF {
+			return feature{}, false
+		}
+		ota = ota<<8 | n
 	}
 	return feature{
 		name:    m[1],
-		version: m[2] + "." + m[3] + "." + m[4],
-		ext:     m[5],
-		ota:     major<<16 | minor<<8 | patch,
+		version: m[2],
+		ext:     m[3],
+		ota:     ota,
 	}, true
 }
 

@@ -80,7 +80,7 @@ func TestInspectFindsMissingSectionsAndCopies(t *testing.T) {
 	root := cacheFixture(t,
 		"[sl_sdk_0]\r\napp_E658703 = 2.14.0",
 		[]bundleSpec{plainSpec(plainConfig), overrideSpec(overrideConfig)},
-		// Only the override family carries payloads: the plain family's files
+		// Only the override bundle carries payloads: the plain bundle's files
 		// must be filled from its sibling.
 		[]string{
 			payload("sl_common_override_0", "1B0", "E658700", "134656"),
@@ -96,7 +96,7 @@ func TestInspectFindsMissingSectionsAndCopies(t *testing.T) {
 	}
 	for _, copy := range plan.Copies {
 		if !strings.Contains(copy.Source, "_override_0") {
-			t.Errorf("copy source %s should come from the override family", copy.Source)
+			t.Errorf("copy source %s should come from the override bundle", copy.Source)
 		}
 	}
 	if !plan.Changed() {
@@ -372,7 +372,7 @@ func TestConfigFromAndSplitArchHash(t *testing.T) {
 	}
 }
 
-func TestSiblingFeatureSwapsFamilies(t *testing.T) {
+func TestSiblingFeatureSwapsBundles(t *testing.T) {
 	cases := map[string]string{
 		"sl_common_0":          "sl_common_override_0",
 		"sl_common_override_0": "sl_common_0",

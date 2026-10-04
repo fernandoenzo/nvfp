@@ -355,10 +355,11 @@ func siblingPayload(root string, feat feature) (string, bool) {
 // siblingFeature swaps a feature between the two bundles, e.g.
 // sl_common_0 <-> sl_common_override_0.
 func siblingFeature(name string) string {
-	if strings.HasSuffix(name, "_override_0") {
-		return strings.TrimSuffix(name, "_override_0") + "_0"
+	if base, ok := strings.CutSuffix(name, "_override_0"); ok {
+		return base + "_0"
 	}
-	return strings.TrimSuffix(name, "_0") + "_override_0"
+	base, _ := strings.CutSuffix(name, "_0")
+	return base + "_override_0"
 }
 
 // bundleDir returns the cache directory a package config belongs to. The path

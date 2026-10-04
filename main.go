@@ -58,7 +58,13 @@ func newRootCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  run,
 	}
+	registerFlags(rootCmd)
+	markExclusive(rootCmd)
+	return rootCmd
+}
 
+// registerFlags binds every command-tree flag.
+func registerFlags(rootCmd *cobra.Command) {
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing files")
 	rootCmd.Flags().BoolVar(&listOnly, "list", false, "List games in the database")
 	rootCmd.Flags().BoolVar(&restoreFlag, "restore", false, "Restore the original fingerprint.db from the DAO copy")
@@ -70,6 +76,10 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
 	rootCmd.Flags().BoolVar(&slOverrideFlag, "sl-override", false, "Repair Streamline payloads and per-feature entries in the NGX cache")
+}
+
+// markExclusive declares the flag combinations that cannot be combined.
+func markExclusive(rootCmd *cobra.Command) {
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "list")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "game")
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
@@ -80,8 +90,6 @@ func newRootCmd() *cobra.Command {
 	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
 		rootCmd.MarkFlagsMutuallyExclusive("sl-override", other)
 	}
-
-	return rootCmd
 }
 
 func main() {
@@ -91,41 +99,44 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// Version is a local, information-only operation: it must not depend on
-	// the manifest, the cache, or the network.
-	if versionFlag {
+	// Version, restore and the NGX repair are local operations: they must not
+	// depend on the manifest, the cache, or the network.
+	switch {
+	case versionFlag:
 		fmt.Fprint(cmd.OutOrStdout(), versionMessage)
 		return nil
-	}
-	// Restore is a local file operation: it must not depend on the manifest,
-	// the cache, or the network.
-	if restoreFlag {
+	case restoreFlag:
 		return restoreDB()
-	}
-	// The NGX manifest repair is also purely local: it reads the driver
-	// bundles under ProgramData, never the games manifest.
-	if slOverrideFlag {
-		// The elevated child's console closes the instant the process exits:
-		// hold it open when there is a real window to read.
-		if elevatedFlag && !stdoutIsPiped() {
-			defer pauseBeforeExit()
-		}
-		return applySLOverride()
+	case slOverrideFlag:
+		return runSLOverride()
 	}
 	gameDB, err := resolveGames()
 	if err != nil {
 		return fmt.Errorf("loading games database: %w", err)
 	}
-	if listOnly {
+	// List and doctor never touch the driver database.
+	switch {
+	case listOnly:
 		listGames(gameDB)
 		return nil
-	}
-	// Doctor reads the driver database, never writes: no elevation, no window
-	// that closes before the output can be read.
-	if doctorFlag {
+	case doctorFlag:
 		return doctor(gameDB)
 	}
+	return patchEverything(gameDB)
+}
 
+// runSLOverride repairs the NGX cache, holding the elevated child's console
+// open when there is a real window to read.
+func runSLOverride() error {
+	if elevatedFlag && !stdoutIsPiped() {
+		defer pauseBeforeExit()
+	}
+	return applySLOverride()
+}
+
+// patchEverything patches fingerprint.db and, unless the step is disabled,
+// registers the selected games in the driver profiles.
+func patchEverything(gameDB *db.GameDB) error {
 	// The elevated relaunch does all the work, driver step included: never ask
 	// for UAC twice.
 	ensureElevated(!dryRun && !noDriverFlag && hasDriverWork(gameDB))
@@ -136,12 +147,10 @@ func run(cmd *cobra.Command, args []string) error {
 	if elevatedFlag && hasDriverWork(gameDB) && !stdoutIsPiped() {
 		defer pauseBeforeExit()
 	}
-
 	dbPath, err := findFingerprintDB()
 	if err != nil {
 		return err
 	}
-
 	fdb, _, err := patchDB(gameDB, dbPath)
 	if err != nil {
 		return err
@@ -326,17 +335,17 @@ func resolveGames() (*db.GameDB, error) {
 }
 
 func getCacheDir() (string, error) {
-	// On Windows: %LOCALAPPDATA%\nvidia-uwp-patch (cached data stays on the machine)
+	// On Windows: %LOCALAPPDATA%\nvfp (cached data stays on the machine)
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData != "" {
-		return filepath.Join(localAppData, "nvidia-uwp-patch"), nil
+		return filepath.Join(localAppData, "nvfp"), nil
 	}
 	// Fallback for non-Windows (testing)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".cache", "nvidia-uwp-patch"), nil
+	return filepath.Join(home, ".cache", "nvfp"), nil
 }
 
 // getNvidiaAppDir returns the NVIDIA App backend directory.
@@ -527,21 +536,25 @@ func applyDriverStep(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) error {
 		printDriverPlan(reqs)
 		return nil
 	}
+	return runDriverStep(reqs)
+}
+
+// runDriverStep performs the privileged registration, skipping with a warning
+// instead of failing the run.
+func runDriverStep(reqs []nvdr.Request) error {
 	elevated, err := isElevated()
+	if err == nil && !elevated {
+		err = errors.New("administrator privileges required (run as administrator)")
+	}
+	if err == nil {
+		var results []nvdr.Result
+		if results, err = nvdr.Apply(reqs); err == nil {
+			printDriverResults(results)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: driver profiles skipped: %v\n", err)
-		return nil
 	}
-	if !elevated {
-		fmt.Fprintln(os.Stderr, "Warning: driver profiles skipped: administrator privileges required (run as administrator)")
-		return nil
-	}
-	results, err := nvdr.Apply(reqs)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: driver profiles skipped: %v\n", err)
-		return nil
-	}
-	printDriverResults(results)
 	return nil
 }
 
@@ -550,22 +563,11 @@ func applyDriverStep(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) error {
 // child's window closes as soon as the work is done, which makes a failing
 // resolution impossible to diagnose from the console.
 func doctor(gameDB *db.GameDB) error {
-	dbPath, err := findFingerprintDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fingerprint.db not found, showing manifest candidates only: %v\n", err)
-	}
-	var fdb *nvidia.FingerprintDB
-	if dbPath != "" {
-		if parsed, err := nvidia.ParseFingerprintDB(dbPath); err == nil {
-			fdb = parsed
-		}
-	}
-	reqs := driverRequests(gameDB, fdb)
+	reqs := driverRequests(gameDB, loadFingerprintForDoctor())
 	if len(reqs) == 0 {
 		fmt.Println("Nothing to do: no selected game carries a driver application string.")
 		return nil
 	}
-
 	report, err := nvdr.Diagnose(reqs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not read the driver profiles: %v\n", err)
@@ -574,37 +576,64 @@ func doctor(gameDB *db.GameDB) error {
 	}
 	fmt.Println("Driver profile resolution (read-only, nothing is written):")
 	for i, req := range reqs {
-		fmt.Printf("\n%s\n", req.Fingerprint)
-		fmt.Printf("  application string : %s\n", req.App)
-		if req.Profile != "" {
-			fmt.Printf("  pinned profile     : %s\n", req.Profile)
-		}
-		if len(req.Candidates) == 0 {
-			fmt.Println("  candidates         : none (fingerprint not found, or it has no <DriverProfile>)")
-			if req.Profile == "" {
-				fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
-			}
-			continue
-		}
-		fmt.Println("  candidates         :")
-		for _, attempt := range report[i] {
-			mark := "✗"
-			detail := nvdr.StatusName(attempt.Status)
-			if attempt.Status == 0 {
-				mark = "✓"
-				detail = fmt.Sprintf("matched profile %q", attempt.Profile)
-			}
-			fmt.Printf("      %s %-48s %s\n", mark, attempt.Attempt, detail)
-		}
-		matched := false
-		for _, attempt := range report[i] {
-			matched = matched || attempt.Status == 0
-		}
-		if !matched {
-			fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
-		}
+		reportRequest(req, report[i])
 	}
 	return nil
+}
+
+// loadFingerprintForDoctor parses fingerprint.db when it can, so the report
+// can name the executables; a missing database only costs the candidates.
+func loadFingerprintForDoctor() *nvidia.FingerprintDB {
+	dbPath, err := findFingerprintDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fingerprint.db not found, showing manifest candidates only: %v\n", err)
+		return nil
+	}
+	parsed, err := nvidia.ParseFingerprintDB(dbPath)
+	if err != nil {
+		return nil
+	}
+	return parsed
+}
+
+// reportRequest prints one game's resolution: its identity, every candidate
+// the driver answered for, and a hint when nothing matched.
+func reportRequest(req nvdr.Request, attempts []nvdr.LookupAttempt) {
+	fmt.Printf("\n%s\n", req.Fingerprint)
+	fmt.Printf("  application string : %s\n", req.App)
+	if req.Profile != "" {
+		fmt.Printf("  pinned profile     : %s\n", req.Profile)
+	}
+	if len(req.Candidates) == 0 {
+		fmt.Println("  candidates         : none (fingerprint not found, or it has no <DriverProfile>)")
+		if req.Profile == "" {
+			printUnresolvedHint()
+		}
+		return
+	}
+	fmt.Println("  candidates         :")
+	matched := false
+	for _, attempt := range attempts {
+		printAttempt(attempt)
+		matched = matched || attempt.Status == 0
+	}
+	if !matched {
+		printUnresolvedHint()
+	}
+}
+
+// printAttempt renders one candidate lookup with its NVAPI status, or the
+// profile it matched.
+func printAttempt(attempt nvdr.LookupAttempt) {
+	mark, detail := "✗", nvdr.StatusName(attempt.Status)
+	if attempt.Status == 0 {
+		mark, detail = "✓", fmt.Sprintf("matched profile %q", attempt.Profile)
+	}
+	fmt.Printf("      %s %-48s %s\n", mark, attempt.Attempt, detail)
+}
+
+func printUnresolvedHint() {
+	fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
 }
 
 // printDriverPlan shows what the driver step would do, without touching the
@@ -639,27 +668,37 @@ func printDriverResults(results []nvdr.Result) {
 func listGames(gameDB *db.GameDB) {
 	fmt.Printf("Games database version: %d\n", gameDB.Version)
 	fmt.Printf("Total games: %d\n\n", len(gameDB.Games))
-
 	for _, game := range gameDB.Games {
-		fmt.Printf("  %s\n", game.Fingerprint)
-		fmt.Printf("    AppUserModelId: %s\n", game.AppUserModelID)
-		fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
-		if game.SkipDriver {
-			fmt.Println("    SkipDriver: true")
-		} else if app := game.DriverAppString(); app != "" {
-			fmt.Printf("    DriverApp: %s\n", app)
+		printGameEntry(game)
+	}
+}
+
+// printGameEntry prints one manifest game and its identity fields.
+func printGameEntry(game *db.Game) {
+	fmt.Printf("  %s\n", game.Fingerprint)
+	fmt.Printf("    AppUserModelId: %s\n", game.AppUserModelID)
+	fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
+	if game.SkipDriver {
+		fmt.Println("    SkipDriver: true")
+	} else if app := game.DriverAppString(); app != "" {
+		fmt.Printf("    DriverApp: %s\n", app)
+	}
+	if game.DriverProfile != "" {
+		fmt.Printf("    DriverProfile: %s\n", game.DriverProfile)
+	}
+	printGameOverrides(game)
+}
+
+// printGameOverrides prints the overrides sorted by key and the removal list,
+// the two fields that change what the patch writes.
+func printGameOverrides(game *db.Game) {
+	if len(game.Overrides) > 0 {
+		fmt.Println("    Overrides:")
+		for _, k := range slices.Sorted(maps.Keys(game.Overrides)) {
+			fmt.Printf("      %s: %s\n", k, game.Overrides[k])
 		}
-		if game.DriverProfile != "" {
-			fmt.Printf("    DriverProfile: %s\n", game.DriverProfile)
-		}
-		if len(game.Overrides) > 0 {
-			fmt.Println("    Overrides:")
-			for _, k := range slices.Sorted(maps.Keys(game.Overrides)) {
-				fmt.Printf("      %s: %s\n", k, game.Overrides[k])
-			}
-		}
-		if len(game.Remove) > 0 {
-			fmt.Printf("    Remove: %v\n", slices.Sorted(slices.Values(game.Remove)))
-		}
+	}
+	if len(game.Remove) > 0 {
+		fmt.Printf("    Remove: %v\n", slices.Sorted(slices.Values(game.Remove)))
 	}
 }

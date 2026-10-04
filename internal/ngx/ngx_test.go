@@ -468,18 +468,21 @@ func TestDiscoverPicksHighestNumericOTA(t *testing.T) {
 	}
 }
 
-// A same-OTA tie is resolved by the lexicographically first config path.
+// A same-OTA tie is resolved by the lexicographically first config path, run
+// after run: the walk order must never decide it.
 func TestDiscoverChoosesLexicalPathForOTATies(t *testing.T) {
 	specs := []bundleSpec{
 		{"sl_sdk_0", "160", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
 		{"sl_sdk_0", "1B0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
 	}
-	features, warnings := discover(cacheFixture(t, "", specs, nil))
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %v, want none", warnings)
-	}
-	if len(features) != 1 || features[0].arch != "160" {
-		t.Fatalf("features = %+v, want the 160 config (first path wins)", features)
+	for range 5 {
+		features, warnings := discover(cacheFixture(t, "", specs, nil))
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %v, want none", warnings)
+		}
+		if len(features) != 1 || features[0].arch != "160" {
+			t.Fatalf("features = %+v, want the 160 config (first path wins)", features)
+		}
 	}
 }
 

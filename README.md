@@ -107,7 +107,7 @@ and discovers the bundle's hash and architecture. It adds missing per-feature se
 versions, and restores payloads only from a matching `_0` / `_override_0` sibling with the same architecture;
 none of those bundle details are hard-coded.
 
-On the first manifest change it preserves `nvngx_config.txt.bak`. The new manifest is written to a unique temporary sibling, synced and replaced; the containing directory is synced where supported. Rename and crash-durability guarantees still depend on the OS and filesystem.
+On the first manifest change it preserves `nvngx_config.txt.bak`. The new manifest is written to a unique temporary sibling, flushed to disk and then renamed over the old file, so a crash leaves either the previous manifest or the new one, never a half-written file. The containing directory is synced where the filesystem supports it; filesystems that refuse a directory flush are tolerated, since the rename has already happened.
 
 The parser rejects invalid UTF-8 and NUL bytes, accepts CRLF/LF/CR and a leading BOM, preserves unrecognized lines and unchanged spacing, and emits canonical UTF-8/CRLF output.
 
@@ -408,7 +408,7 @@ If you decline the prompt, or the relaunch fails, the driver step is skipped wit
 The program looks for `games.json` in this order:
 
 1. **Remote** (GitHub) — if online, downloads the latest version and caches it
-2. **Local cache** (`%LOCALAPPDATA%\nvidia-uwp-patch\games.json`) — if offline but a previous download exists
+2. **Local cache** (`%LOCALAPPDATA%\nvfp\games.json`) — if offline but a previous download exists
 3. **Embedded** in the .exe — final fallback, always available
 
 If the cache exists but is corrupt, it warns you and falls back to the embedded copy.

@@ -49,6 +49,14 @@ Architecture layers:
 6. **Network layer** (`internal/update`): Remote games.json fetch
 7. **Shared utilities** (`internal/fsutil`): staged file copy/replacement and durable directory creation where supported
 
+## Windows icon resources
+
+The application icon is a Windows PE resource, not a Go embed. `nvfp.rc` declares `1 ICON "nvfp.ico"` and `x86_64-w64-mingw32-windres` compiles it into `nvfp_res_windows_amd64.syso`, a COFF object holding the `.rsrc` section the Go linker merges into the executable. The `_windows_amd64` suffix makes the Go toolchain ignore the object on every other GOOS/GOARCH, so plain `go build`/`go vet`/`go test` keep working on Linux.
+
+- The `.syso` is committed: `make build` must work without a MinGW toolchain installed. It is a generated artifact, so it only changes when `nvfp.rc` or `nvfp.ico` changes.
+- `make build` fails with an explicit message when the `.syso` is missing, rather than silently producing an icon-less binary.
+- `windres` output is deterministic (no timestamp is written for icons), so regenerating it yields a byte-identical file and the reproducible-build guarantee in `README.md` still holds.
+
 ## Development Commands
 
 ```bash
@@ -63,8 +71,9 @@ gofmt -l .
 
 ## Code Conventions & Common Patterns
 
-- Prefer small, cohesive functions; extract helpers when they clarify behavior. Wrap errors with `fmt.Errorf("...: %w", err)`.
-- Use standard Go naming and table-driven tests with `t.TempDir()`; use `httptest` for HTTP. Tests use only the standard library.
+- **Function length**: max 25 lines of code per function (comments excluded). Extract helpers early.
+- Wrap errors with `fmt.Errorf("...: %w", err)`. Report non-fatal failures to stderr; return an error only when the caller should abort.
+- Use standard Go naming and table driven tests with `t.TempDir()`; use `httptest` for HTTP. Tests use the standard `testing` package and the `set` helper from `github.com/fernandoenzo/set` where a set is already in play — no test framework or mocking library.
 - Keep `XmlElement` generic so unknown fingerprint XML survives round-trips. `PatchGame` takes `*FingerprintDB` and `*db.Game`.
 - JSON types: `GameDB.Games []*db.Game`, `db.Game.Versions []string`; save deterministically. Resolve remote → cache → bundled; an empty cache path disables disk caching.
 - `driver_app`, `driver_profile` and `skip_driver` are independent of versions. `DriverAppString()` is the sole registration source; `skip_driver` skips DRS but keeps the XML patch.
@@ -72,6 +81,8 @@ gofmt -l .
 - Resolve profiles by exact `driver_profile` or `<DriverProfile>` candidates; never invent profiles. DRS matches process name, not package identity, and ignores `isMetro`.
 - NVAPI IDs and struct layouts are pinned with cross-platform tests and compile-time asserts. Driver strings are limited to 2047 UTF-16 units excluding NUL; never truncate.
 - `ensureElevated` is the single UAC path. `--restore` restores only `fingerprint.db`; DRS entries are additive.
+- **Version banner**: `--version`/`-v` is a plain bool flag handled at the top of `run()`. The banner is assembled in `main.go` from the `version` and `versionDate` constants; bump both on every release. It does **not** use Cobra's `Command.Version`/`SetVersionTemplate`: that path pulls `cobra.tmpl` → `text/template` (+`reflect`) into the binary (~+1.9 MB). Its shape mirrors the author's other CLIs (name, version, date, copyright, GPLv3+ notice, author).
+- Cache directory and `User-Agent` both use the `nvfp` name (`%LOCALAPPDATA%\nvfp`, fallback `~/.cache/nvfp`).
 - The manifest parser preserves opaque lines and value prefixes, validates UTF-8, rejects NUL, and writes canonical CRLF. `CopyFile` and `WriteFileAtomic` stage to unique sibling files, flush before replacement and sync directories where supported; OS/filesystem guarantees vary.
 - NGX selects the highest numeric OTA (lexical path breaks ties), warns only for malformed Streamline configs, and copies sibling payloads only for the same architecture. `Missing` means no compatible-architecture payload was found.
 - Keep the custom manifest parser; general INI/TOML/YAML libraries rewrite or misparse NVIDIA's format. HTTP fetches use a 10s timeout, 5MB limit and custom `User-Agent`.

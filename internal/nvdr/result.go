@@ -70,35 +70,52 @@ func (r Result) Patched() bool { return r.Status == StatusPatched }
 // newResult builds the result for a request, formatting the message for the
 // resolved profile. errDetail is only used by StatusFailed.
 func newResult(status Status, req Request, profile string, errDetail ...string) Result {
-	res := Result{
+	message := resultMessage(status, req, profile, errDetail...)
+	return Result{
 		Status:      status,
 		Fingerprint: req.Fingerprint,
 		Profile:     profile,
 		App:         req.App,
+		Message:     message,
 	}
+}
+
+// resultMessage words the outcome for the user, naming the candidate strings
+// when the profile could not be resolved.
+func resultMessage(status Status, req Request, profile string, errDetail ...string) string {
 	switch status {
 	case StatusPatched:
-		res.Message = fmt.Sprintf("added %s to driver profile %q", req.App, profile)
+		return fmt.Sprintf("added %s to driver profile %q", req.App, profile)
 	case StatusAlreadyPresent:
-		res.Message = fmt.Sprintf("%s already in driver profile %q", req.App, profile)
+		return fmt.Sprintf("%s already in driver profile %q", req.App, profile)
 	case StatusProfileNotFound:
-		res.Message = fmt.Sprintf("driver profile %q not found", profile)
-	case StatusProfileUnresolved:
-		if len(req.Candidates) == 0 {
-			res.Message = fmt.Sprintf("no driver profile found for %q; set %q in games.json",
-				req.Fingerprint, "driver_profile")
-			break
-		}
-		res.Message = fmt.Sprintf("no driver profile found for %q (tried: %s); set %q in games.json",
-			req.Fingerprint, strings.Join(req.Candidates, ", "), "driver_profile")
+		return fmt.Sprintf("driver profile %q not found", profile)
 	case StatusConflict:
-		res.Message = fmt.Sprintf("%s is already assigned to driver profile %q", req.App, profile)
+		return fmt.Sprintf("%s is already assigned to driver profile %q", req.App, profile)
+	case StatusProfileUnresolved:
+		return unresolvedMessage(req)
 	case StatusFailed:
-		detail := "unknown error"
-		if len(errDetail) > 0 {
-			detail = errDetail[0]
-		}
-		res.Message = fmt.Sprintf("adding %s to driver profile %q failed: %s", req.App, profile, detail)
+		return failedMessage(req, profile, errDetail...)
 	}
-	return res
+	return ""
+}
+
+// unresolvedMessage explains how to pin the profile in the manifest.
+func unresolvedMessage(req Request) string {
+	if len(req.Candidates) == 0 {
+		return fmt.Sprintf("no driver profile found for %q; set %q in games.json",
+			req.Fingerprint, "driver_profile")
+	}
+	return fmt.Sprintf("no driver profile found for %q (tried: %s); set %q in games.json",
+		req.Fingerprint, strings.Join(req.Candidates, ", "), "driver_profile")
+}
+
+// failedMessage reports the driver's own reason, defaulting to a placeholder
+// when the caller passed none.
+func failedMessage(req Request, profile string, errDetail ...string) string {
+	detail := "unknown error"
+	if len(errDetail) > 0 {
+		detail = errDetail[0]
+	}
+	return fmt.Sprintf("adding %s to driver profile %q failed: %s", req.App, profile, detail)
 }

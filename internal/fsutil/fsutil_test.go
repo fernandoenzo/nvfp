@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -211,6 +212,46 @@ func (partialErrorReader) Read(p []byte) (int, error) {
 	}
 	p[0] = 'x'
 	return 1, io.ErrUnexpectedEOF
+}
+
+// A filesystem that refuses a directory flush (some network and FUSE mounts)
+// must still report the write as successful: the rename already committed.
+func TestWriteFileAtomicToleratesUnsupportedDirSync(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nvngx_config.txt")
+	defer func(original func(string) error) { syncDir = original }(syncDir)
+	syncDir = func(string) error { return errDirSyncUnsupported }
+
+	if err := WriteFileAtomic(path, []byte("new content"), 0o644); err != nil {
+		t.Fatalf("WriteFileAtomic with an unsupported directory sync: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	if string(got) != "new content" {
+		t.Errorf("file = %q, want new content", got)
+	}
+	assertNoAtomicTemporary(t, path)
+}
+
+// A real directory-sync failure is not swallowed: it is reported, because the
+// caller may be relying on crash durability.
+func TestWriteFileAtomicReportsDirSyncFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nvngx_config.txt")
+	defer func(original func(string) error) { syncDir = original }(syncDir)
+	syncDir = func(string) error { return errors.New("I/O error") }
+
+	if err := WriteFileAtomic(path, []byte("new content"), 0o644); err == nil {
+		t.Error("WriteFileAtomic should report a failed directory sync")
+	}
+	// The replacement did happen; only the durability report failed.
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	if string(got) != "new content" {
+		t.Errorf("file = %q, want new content", got)
+	}
 }
 
 func assertNoAtomicTemporary(t *testing.T, path string) {

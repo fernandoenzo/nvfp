@@ -39,19 +39,36 @@ func openAPI() (*api, error) {
 	if err := procQueryInterface.Find(); err != nil {
 		return nil, fmt.Errorf("loading nvapi64.dll (is the NVIDIA driver installed?): %w", err)
 	}
-	query := procQueryInterface.Addr()
-	resolve := func(id uint32) (uintptr, error) {
-		ptr, _, _ := syscall.SyscallN(query, uintptr(id))
-		if ptr == 0 {
-			return 0, fmt.Errorf("nvapi64.dll does not export function 0x%08X", id)
-		}
-		return ptr, nil
-	}
 	a := &api{}
-	for _, target := range []struct {
-		id uint32
-		fn *uintptr
-	}{
+	if err := a.resolveAll(procQueryInterface.Addr()); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// nvapiBinding pairs a pinned NVAPI function ID with the api field it fills.
+type nvapiBinding struct {
+	id uint32
+	fn *uintptr
+}
+
+// resolveAll fills every api field from nvapi_QueryInterface. The table keeps
+// the pinned ID next to the field it belongs to, so adding a function is one
+// line and a typo in an ID stays visible to the cross-platform pinned tests.
+func (a *api) resolveAll(query uintptr) error {
+	for _, target := range a.bindings() {
+		ptr, err := resolveFunction(query, target.id)
+		if err != nil {
+			return err
+		}
+		*target.fn = ptr
+	}
+	return nil
+}
+
+// bindings is the function table resolveAll walks.
+func (a *api) bindings() []nvapiBinding {
+	return []nvapiBinding{
 		{idInitialize, &a.fnInitialize},
 		{idGetErrorMessage, &a.fnGetErrorMessage},
 		{idCreateSession, &a.fnCreateSession},
@@ -63,14 +80,18 @@ func openAPI() (*api, error) {
 		{idCreateApplication, &a.fnCreateApplication},
 		{idFindApplicationByName, &a.fnFindApplicationByName},
 		{idEnumApplications, &a.fnEnumApplications},
-	} {
-		ptr, err := resolve(target.id)
-		if err != nil {
-			return nil, err
-		}
-		*target.fn = ptr
 	}
-	return a, nil
+}
+
+// resolveFunction asks nvapi_QueryInterface for one function ID. A zero
+// pointer means the installed driver does not export it, and a typo in the ID
+// compiles: only the pinned-ID tests catch that before a real driver would.
+func resolveFunction(query uintptr, id uint32) (uintptr, error) {
+	ptr, _, _ := syscall.SyscallN(query, uintptr(id))
+	if ptr == 0 {
+		return 0, fmt.Errorf("nvapi64.dll does not export function 0x%08X", id)
+	}
+	return ptr, nil
 }
 
 func (a *api) initialize() int32 {
@@ -121,38 +142,37 @@ func (a *api) findProfileByName(session uintptr, name string) (uintptr, int32) {
 // Diagnose resolves each request as Apply does, but only returns lookup attempts.
 // It never saves settings; the outer result slice has one entry per request.
 func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
-	a, err := openAPI()
+	a, session, err := openSession(false)
 	if err != nil {
 		return nil, err
 	}
-	session, status := a.createSession()
-	if status != statusOK {
-		return nil, fmt.Errorf("NvAPI_DRS_CreateSession failed: %s", a.errorDetail(status))
-	}
 	defer a.destroySession(session)
-	if status := a.loadSettings(session); status != statusOK {
-		return nil, fmt.Errorf("NvAPI_DRS_LoadSettings failed: %s", a.errorDetail(status))
-	}
-
 	report := make([][]LookupAttempt, 0, len(reqs))
 	for _, req := range reqs {
-		var attempts []LookupAttempt
-		for _, candidate := range req.Candidates {
-			for _, attempt := range []string{candidate, strings.ToLower(candidate)} {
-				entry := LookupAttempt{Attempt: attempt}
-				handle, stat := a.findApplicationByName(session, attempt)
-				entry.Status = stat
-				if stat == statusOK {
-					if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
-						entry.Profile = fromUTF16(info.profileName[:])
-					}
-				}
-				attempts = append(attempts, entry)
-			}
-		}
-		report = append(report, attempts)
+		report = append(report, a.diagnoseCandidates(session, req.Candidates))
 	}
 	return report, nil
+}
+
+// diagnoseCandidates resolves every candidate string, and its lowercase
+// retry, the way Apply would, reporting each answer with the profile it
+// matched.
+func (a *api) diagnoseCandidates(session uintptr, candidates []string) []LookupAttempt {
+	var attempts []LookupAttempt
+	for _, candidate := range candidates {
+		for _, attempt := range []string{candidate, strings.ToLower(candidate)} {
+			entry := LookupAttempt{Attempt: attempt}
+			handle, stat := a.findApplicationByName(session, attempt)
+			entry.Status = stat
+			if stat == statusOK {
+				if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
+					entry.Profile = fromUTF16(info.profileName[:])
+				}
+			}
+			attempts = append(attempts, entry)
+		}
+	}
+	return attempts
 }
 
 // findApplicationByName looks the application up and returns the profile handle
@@ -250,21 +270,11 @@ func buildApplication(name string) (*applicationV4, error) {
 // Nothing is persisted unless at least one application was added; a save
 // failure therefore aborts the whole batch and reports an error.
 func Apply(reqs []Request) ([]Result, error) {
-	a, err := openAPI()
+	a, session, err := openSession(true)
 	if err != nil {
 		return nil, err
 	}
-	if status := a.initialize(); status != statusOK {
-		return nil, fmt.Errorf("NvAPI_Initialize failed: %s", a.errorDetail(status))
-	}
-	session, status := a.createSession()
-	if status != statusOK {
-		return nil, fmt.Errorf("NvAPI_DRS_CreateSession failed: %s", a.errorDetail(status))
-	}
 	defer a.destroySession(session)
-	if status := a.loadSettings(session); status != statusOK {
-		return nil, fmt.Errorf("NvAPI_DRS_LoadSettings failed: %s", a.errorDetail(status))
-	}
 
 	results := make([]Result, 0, len(reqs))
 	created := false
@@ -279,6 +289,29 @@ func Apply(reqs []Request) ([]Result, error) {
 		}
 	}
 	return results, nil
+}
+
+// openSession loads a DRS session for both Apply and Diagnose. initialize
+// calls NvAPI_Initialize first, which only the writing path needs.
+func openSession(initialize bool) (*api, uintptr, error) {
+	a, err := openAPI()
+	if err != nil {
+		return nil, 0, err
+	}
+	if initialize {
+		if status := a.initialize(); status != statusOK {
+			return nil, 0, fmt.Errorf("NvAPI_Initialize failed: %s", a.errorDetail(status))
+		}
+	}
+	session, status := a.createSession()
+	if status != statusOK {
+		return nil, 0, fmt.Errorf("NvAPI_DRS_CreateSession failed: %s", a.errorDetail(status))
+	}
+	if status := a.loadSettings(session); status != statusOK {
+		a.destroySession(session)
+		return nil, 0, fmt.Errorf("NvAPI_DRS_LoadSettings failed: %s", a.errorDetail(status))
+	}
+	return a, session, nil
 }
 
 // processRequest resolves the request's profile, checks whether the application
@@ -298,6 +331,13 @@ func processRequest(a *api, session uintptr, req Request) Result {
 	if present {
 		return newResult(StatusAlreadyPresent, req, profile)
 	}
+	return registerApplication(a, session, handle, profile, req)
+}
+
+// registerApplication adds the request's application to the resolved profile,
+// translating the driver answer into a result. A conflict means another
+// profile already owns that process name; anything else is a failure.
+func registerApplication(a *api, session, handle uintptr, profile string, req Request) Result {
 	app, err := buildApplication(req.App)
 	if err != nil {
 		return newResult(StatusFailed, req, profile, err.Error())
@@ -332,16 +372,27 @@ func (a *api) appRegistered(session, profile uintptr, app string) (bool, error) 
 // fingerprint's executables. No profile is ever created.
 func resolveProfile(a *api, session uintptr, req Request) (uintptr, string, Result, bool) {
 	if req.Profile != "" {
-		handle, status := a.findProfileByName(session, req.Profile)
-		switch status {
-		case statusOK:
-			return handle, req.Profile, Result{}, true
-		case statusProfileNotFound:
-			return 0, req.Profile, newResult(StatusProfileNotFound, req, req.Profile), false
-		default:
-			return 0, req.Profile, newResult(StatusFailed, req, req.Profile, a.errorDetail(status)), false
-		}
+		return a.findProfile(session, req)
 	}
+	return a.findCandidateProfile(session, req)
+}
+
+// findProfile resolves a profile pinned by name in the manifest.
+func (a *api) findProfile(session uintptr, req Request) (uintptr, string, Result, bool) {
+	handle, status := a.findProfileByName(session, req.Profile)
+	switch status {
+	case statusOK:
+		return handle, req.Profile, Result{}, true
+	case statusProfileNotFound:
+		return 0, req.Profile, newResult(StatusProfileNotFound, req, req.Profile), false
+	default:
+		return 0, req.Profile, newResult(StatusFailed, req, req.Profile, a.errorDetail(status)), false
+	}
+}
+
+// findCandidateProfile walks the fingerprint's executables, retrying each one
+// lowercased because the driver stores those names in its own casing.
+func (a *api) findCandidateProfile(session uintptr, req Request) (uintptr, string, Result, bool) {
 	for _, candidate := range req.Candidates {
 		handle, status := a.findApplicationByName(session, candidate)
 		if status == statusExecutableNotFound {

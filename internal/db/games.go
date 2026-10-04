@@ -98,27 +98,37 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 		return nil, fmt.Errorf("games database contains no games")
 	}
 	for _, g := range db.Games {
-		if len(g.Versions) == 0 {
-			return nil, fmt.Errorf("game %q has no versions", g.Fingerprint)
-		}
-		keys := g.VersionKeys()
-		if keys.Contains(AllVersions) && len(g.Versions) != 1 {
-			return nil, fmt.Errorf("game %q: %q must be the only version", g.Fingerprint, AllVersions)
-		}
-		if keys.Contains(UWP) && g.AppUserModelID == "" {
-			return nil, fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")
-		}
-		for _, f := range []struct{ name, value string }{
-			{"driver_app", g.DriverApp},
-			{"driver_profile", g.DriverProfile},
-			{"app_user_model_id", g.AppUserModelID},
-		} {
-			if len(utf16.Encode([]rune(f.value))) > MaxDriverString {
-				return nil, fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
-			}
+		if err := validateGame(g); err != nil {
+			return nil, err
 		}
 	}
 	return &db, nil
+}
+
+// validateGame rejects the manifest entries the patch flow cannot honor: an
+// empty versions list, a wildcard sharing the list, a uwp request without an
+// AppUserModelID, and driver strings the NVAPI fields cannot hold.
+func validateGame(g *Game) error {
+	if len(g.Versions) == 0 {
+		return fmt.Errorf("game %q has no versions", g.Fingerprint)
+	}
+	keys := g.VersionKeys()
+	if keys.Contains(AllVersions) && len(g.Versions) != 1 {
+		return fmt.Errorf("game %q: %q must be the only version", g.Fingerprint, AllVersions)
+	}
+	if keys.Contains(UWP) && g.AppUserModelID == "" {
+		return fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")
+	}
+	for _, f := range []struct{ name, value string }{
+		{"driver_app", g.DriverApp},
+		{"driver_profile", g.DriverProfile},
+		{"app_user_model_id", g.AppUserModelID},
+	} {
+		if len(utf16.Encode([]rune(f.value))) > MaxDriverString {
+			return fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
+		}
+	}
+	return nil
 }
 
 // LoadFromPath loads games.json from a file path.

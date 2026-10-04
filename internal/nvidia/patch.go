@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/set"
 )
 
 // PatchStatus represents the outcome of a patch operation.
@@ -70,30 +71,51 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 func resolveVersions(fp *Fingerprint, game *db.Game) *versionPlan {
 	wanted := game.VersionKeys()
 	all := wanted.Contains(db.AllVersions)
-	plan := new(versionPlan)
-	seen := make([]string, 0, len(fp.Versions))
-	hasUWP := false
-	for _, version := range fp.Versions {
-		name := strings.ToLower(strings.TrimSpace(version.Name))
-		seen = append(seen, name)
-		hasUWP = hasUWP || name == db.UWP
-		if all || wanted.Contains(name) {
-			plan.existing = append(plan.existing, version)
-		}
-	}
+	existing, seen, hasUWP := selectExisting(fp.Versions, wanted, all)
+	plan := &versionPlan{existing: existing}
 	plan.addUWP = !hasUWP && (all || wanted.Contains(db.UWP)) && game.AppUserModelID != ""
 	if plan.addUWP {
 		seen = append(seen, db.UWP)
 	}
 	if !all {
-		for _, name := range game.Versions {
-			key := strings.ToLower(strings.TrimSpace(name))
-			if !slices.Contains(seen, key) {
-				plan.missing = append(plan.missing, key)
-			}
-		}
+		plan.missing = missingVersions(game.Versions, seen)
 	}
 	return plan
+}
+
+// selectExisting walks the fingerprint's versions in document order and
+// returns the ones the request selects, every lowercased name seen, and
+// whether the fingerprint already carries a uwp version.
+func selectExisting(versions []*Version, wanted *set.Set[string], all bool) (existing []*Version, seen []string, hasUWP bool) {
+	seen = make([]string, 0, len(versions))
+	for _, version := range versions {
+		name := versionKey(version.Name)
+		seen = append(seen, name)
+		hasUWP = hasUWP || name == db.UWP
+		if all || wanted.Contains(name) {
+			existing = append(existing, version)
+		}
+	}
+	return existing, seen, hasUWP
+}
+
+// missingVersions returns the requested names the fingerprint does not have,
+// normalized the way versions are compared.
+func missingVersions(requested []string, seen []string) []string {
+	var missing []string
+	for _, name := range requested {
+		key := versionKey(name)
+		if !slices.Contains(seen, key) {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+// versionKey normalizes a version name for comparisons: the manifest and the
+// fingerprint may spell the same version with different casing or padding.
+func versionKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // applyVersion updates one existing version with the game's overrides and

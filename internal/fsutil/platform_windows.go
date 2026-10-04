@@ -3,6 +3,7 @@
 package fsutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,10 +29,24 @@ func replaceFile(oldpath, newpath string) error {
 	if err != nil {
 		return fmt.Errorf("encoding %s: %w", newpath, err)
 	}
-	if err := windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
-		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: err}
+	err = windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	if err != nil {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: replaceHint(err)}
 	}
 	return nil
+}
+
+// replaceHint explains the two failures a locked destination produces, which
+// are otherwise indistinguishable from a genuinely broken filesystem.
+func replaceHint(err error) error {
+	switch {
+	case errors.Is(err, windows.ERROR_SHARING_VIOLATION):
+		return fmt.Errorf("%w (the file is open in another program, e.g. NVIDIA App: close it and retry)", err)
+	case errors.Is(err, windows.ERROR_ACCESS_DENIED):
+		return fmt.Errorf("%w (access denied: an elevated process or antivirus may be holding the file)", err)
+	default:
+		return err
+	}
 }
 
 func extendedPath(path string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"syscall"
 )
 
 func replaceFile(oldpath, newpath string) error {
@@ -23,6 +24,11 @@ func syncDirectory(path string) (retErr error) {
 		}
 	}()
 	if err := dir.Sync(); err != nil {
+		// Filesystems without directory sync (some network and FUSE mounts)
+		// must not fail the write: the rename has already happened.
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS) {
+			return errDirSyncUnsupported
+		}
 		return fmt.Errorf("flushing directory %s: %w", path, err)
 	}
 	return nil

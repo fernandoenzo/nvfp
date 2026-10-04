@@ -15,7 +15,7 @@ func FetchGamesJSON() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "nvidia-uwp-patch")
+	req.Header.Set("User-Agent", "nvfp")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

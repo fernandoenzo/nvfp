@@ -106,9 +106,13 @@ Could not find version matching for plugin: reflex_0
 Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loaded!
 ```
 
-`--sl-override` rebuilds them. It reads the authoritative feature list from both
-bundles' own `nvngx_package_config.txt`, restores a payload that exists under
-only one hash from the sibling bundle (identical bytes), appends the missing
+`--sl-override` rebuilds them. It reads the authoritative feature list from every
+Streamline bundle's own `nvngx_package_config.txt` — nothing about the bundles is
+hard-coded, so a new bundle, hash, GPU arch or Streamline version keeps working:
+the cache is walked for `versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt`,
+the section name is the row's first field, the version its second, and the arch
+and app hash come from that directory name. It restores a payload that exists
+under only one hash from the sibling bundle (identical bytes), appends the missing
 `[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a section
 that pins an outdated version** — the interposer resolves a feature to
 `versions\<ota>`, so leaving a stale version in place points it at a directory

@@ -844,9 +844,9 @@ func slFixture(t *testing.T) string {
 	root := t.TempDir()
 	files := map[string]string{
 		"nvngx_config.txt": "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_sdk_override_0]\r\napp_E658700 = 2.14.0",
-		filepath.Join("sl_sdk_0", "versions", "1", "nvngx_package_config.txt"):                  "sl_common_0, 2.14.0, .dll, sl.common.dll\n",
-		filepath.Join("sl_sdk_override_0", "versions", "1", "nvngx_package_config.txt"):         "sl_common_override_0, 2.14.0, .dll, sl.common.dll\n",
-		filepath.Join("sl_common_override_0", "versions", "134656", "files", "1B0_E658700.dll"): "payload bytes",
+		filepath.Join("sl_sdk_0", "versions", "134656", "files", "1B0_E658703", "nvngx_package_config.txt"):          "sl_common_0, 2.14.0, .dll, sl.common.dll\n",
+		filepath.Join("sl_sdk_override_0", "versions", "134656", "files", "1B0_E658700", "nvngx_package_config.txt"): "sl_common_override_0, 2.14.0, .dll, sl.common.dll\n",
+		filepath.Join("sl_common_override_0", "versions", "134656", "files", "1B0_E658700.dll"):                      "payload bytes",
 	}
 	for name, content := range files {
 		path := filepath.Join(root, name)
@@ -1001,9 +1001,9 @@ func TestSLOverrideStaleAndMissing(t *testing.T) {
 		"; NVIDIA NGX OTA cache\r\n"+
 			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n"+
 			"[sl_common_0]\r\napp_E658703=2.14.0\r\n")
-	writeFile("sl_sdk_0/versions/1/nvngx_package_config.txt",
+	writeFile("sl_sdk_0/versions/134659/files/1B0_E658703/nvngx_package_config.txt",
 		"sl_common_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_0, 2.14.3, .dll, sl.reflex.dll\n")
-	writeFile("sl_sdk_override_0/versions/1/nvngx_package_config.txt",
+	writeFile("sl_sdk_override_0/versions/134659/files/1B0_E658700/nvngx_package_config.txt",
 		"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
 	writeFile("sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
 	writeFile("sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")

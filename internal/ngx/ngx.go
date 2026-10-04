@@ -4,10 +4,19 @@
 // bundle sections, dropping the per-feature [sl_<feat>_0] and
 // [sl_<feat>_override_0] ones. The interposer resolves plugins per feature, so
 // both of its passes then fail and the game falls back to its bundled plugins.
-// Inspect and Apply rebuild those sections from the two bundles' own package
+// Inspect and Apply rebuild those sections from the bundles' own package
 // configs, correct a section that still points at a version the cache no longer
 // has, fill a payload that exists under only one hash from its sibling bundle,
 // and are idempotent: a repaired manifest is never touched again.
+//
+// Nothing about the bundles is hard-coded: the cache is discovered from disk.
+// A bundle is any <dir> under the root holding a
+// versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt whose rows name
+// Streamline (sl_) features; the arch and the app hash come from that directory
+// name, and a feature's payload lives at
+// <root>/<feature>/versions/<ota>/files/<arch>_<hash><ext>. A bundle with no
+// sl_ rows (e.g. the DLSS payload bundle) is not a Streamline bundle and is
+// left alone.
 //
 // The manifest is parsed, mutated in memory and written back whole, so the
 // format itself (line endings, section spacing) lives in one place:
@@ -19,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,24 +42,11 @@ const (
 	manifestName = "nvngx_config.txt"
 	// packageConfigName is the authoritative feature list inside each bundle.
 	packageConfigName = "nvngx_package_config.txt"
-	// arch is the GPU architecture marker in payload file names: 0x1B0 (RTX 50
-	// series) is the only one the cache ships.
-	arch = "1B0"
+	// versionsDir and filesDir are the two fixed path components between a
+	// cache directory and a payload; the rest (arch, hash) is discovered.
+	versionsDir = "versions"
+	filesDir    = "files"
 )
-
-// family is one Streamline bundle; the two ship the same features, so a payload
-// missing under one hash can be filled with the sibling's identical file.
-type family struct {
-	bundle string // cache directory name
-	hash   string // app hash used in the manifest, e.g. app_E658703
-	other  string // hash of the sibling family
-}
-
-// sl_sdk_0 (CMSID 0, hash E658703) and sl_sdk_override_0 (CMSID 3, hash E658700).
-var families = []family{
-	{bundle: "sl_sdk_0", hash: "E658703", other: "E658700"},
-	{bundle: "sl_sdk_override_0", hash: "E658700", other: "E658703"},
-}
 
 // Plan is what applying the repair to the NGX cache would do.
 type Plan struct {
@@ -67,7 +64,7 @@ type Plan struct {
 // Section is one per-feature manifest entry and what the manifest says about it.
 type Section struct {
 	Feature string // e.g. sl_common_override_0
-	Hash    string // app hash of its family
+	Hash    string // app hash of its bundle, e.g. E658700
 	Version string // version the bundle ships now
 	Current string // version the manifest declares, empty when absent
 	Present bool   // the manifest already carries [Feature]
@@ -129,30 +126,23 @@ func Inspect(root string) (*Plan, error) {
 		Backup:   path + ".bak",
 		doc:      doc,
 	}
-	queued := map[string]bool{}
-	for _, fam := range families {
-		features, err := familyFeatures(filepath.Join(root, fam.bundle))
-		if err != nil {
-			plan.Warnings = append(plan.Warnings, err.Error())
-			continue
-		}
-		for _, feat := range features {
-			plan.add(fam, feat, queued)
-		}
+	features, warnings := discover(root)
+	plan.Warnings = warnings
+	if len(features) == 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("%s: no Streamline (sl_) bundle found", root))
+	}
+	for _, feat := range features {
+		plan.add(root, feat)
 	}
 	return plan, nil
 }
 
 // add records one feature: a payload copy when its file is missing, and the
-// manifest entry it needs unless the plan already handled that feature.
-func (p *Plan) add(fam family, feat feature, queued map[string]bool) {
-	if queued[feat.name] {
-		return
-	}
-	queued[feat.name] = true
-	dest := payloadPath(p.Root, feat, fam.hash)
+// manifest entry it needs.
+func (p *Plan) add(root string, feat feature) {
+	dest := payloadPath(root, feat)
 	if !exists(dest) {
-		source, ok := siblingPayload(p.Root, feat, fam)
+		source, ok := siblingPayload(root, feat)
 		if !ok {
 			p.Missing = append(p.Missing, feat.name)
 			return
@@ -161,12 +151,12 @@ func (p *Plan) add(fam family, feat feature, queued map[string]bool) {
 	}
 	section := Section{
 		Feature: feat.name,
-		Hash:    fam.hash,
+		Hash:    feat.hash,
 		Version: feat.version,
 	}
 	if b := p.doc.section(feat.name); b != nil {
 		section.Present = true
-		section.Current, _ = b.get("app_" + fam.hash)
+		section.Current, _ = b.get("app_" + feat.hash)
 	}
 	p.Sections = append(p.Sections, section)
 }
@@ -233,17 +223,68 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+// discover finds every Streamline bundle in the cache and returns its features,
+// one per feature name, in bundle-then-config order, plus a warning per bundle
+// that could not be read.
+func discover(root string) ([]feature, []string) {
+	// One bundle keeps one package config per update; the highest path is the
+	// newest, which is the one that ships now.
+	newest := map[string]string{}
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() != packageConfigName {
+			return nil
+		}
+		bundle := bundleDir(path)
+		if bundle == "" {
+			return nil
+		}
+		if current, ok := newest[bundle]; !ok || path > current {
+			newest[bundle] = path
+		}
+		return nil
+	})
+	var (
+		features []feature
+		warnings []string
+		seen     = map[string]bool{}
+	)
+	for _, bundle := range slices.Sorted(maps.Keys(newest)) {
+		path := newest[bundle]
+		arch, hash := dirArchHash(filepath.Dir(path))
+		if arch == "" || hash == "" {
+			warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", path))
+			continue
+		}
+		feats, err := parseConfig(path, arch, hash)
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		for _, feat := range feats {
+			if seen[feat.name] {
+				continue
+			}
+			seen[feat.name] = true
+			features = append(features, feat)
+		}
+	}
+	return features, warnings
+}
+
 // feature is one feature row of a bundle's package config.
 type feature struct {
 	name    string // e.g. sl_common_override_0
 	version string // e.g. 2.14.0
+	ext     string // e.g. .dll
 	ota     int    // version directory: 2.14.0 -> 134656
+	arch    string // GPU arch from the config directory, e.g. 1B0
+	hash    string // app hash from the config directory, e.g. E658703
 }
 
-// featureLine matches a bundle's feature rows:
+// featureLine matches a Streamline feature row and its four fields:
 //
 //	sl_common_override_0, 2.14.0, .dll, sl.common.dll
-var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+)\.(\d+)\.(\d+)\s*,`)
+var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+)\.(\d+)\.(\d+)\s*,\s*(\.[A-Za-z0-9]+)`)
 
 // parseFeature reads one feature row; anything else yields false.
 func parseFeature(line string) (feature, bool) {
@@ -266,17 +307,15 @@ func parseFeature(line string) (feature, bool) {
 	return feature{
 		name:    m[1],
 		version: m[2] + "." + m[3] + "." + m[4],
+		ext:     m[5],
 		ota:     major<<16 | minor<<8 | patch,
 	}, true
 }
 
-// familyFeatures reads a bundle's newest package config and returns every
-// feature row, in file order.
-func familyFeatures(bundleDir string) ([]feature, error) {
-	path, err := newestPackageConfig(bundleDir)
-	if err != nil {
-		return nil, err
-	}
+// parseConfig reads a bundle's feature rows, keeping the Streamline (sl_) ones
+// and stamping each with the bundle's arch and hash. A bundle with no sl_ rows
+// (e.g. the DLSS payload bundle) yields an empty slice.
+func parseConfig(path, arch, hash string) ([]feature, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
@@ -284,45 +323,29 @@ func familyFeatures(bundleDir string) ([]feature, error) {
 	var features []feature
 	for line := range strings.SplitSeq(string(data), "\n") {
 		if feat, ok := parseFeature(line); ok {
+			feat.arch = arch
+			feat.hash = hash
 			features = append(features, feat)
 		}
-	}
-	if len(features) == 0 {
-		return nil, fmt.Errorf("%s: no feature rows found", path)
 	}
 	return features, nil
 }
 
-// newestPackageConfig returns a bundle's newest package config. A bundle keeps
-// one per update, and the highest path sorts last: the same pick the original
-// script made with Sort-Object -Descending.
-func newestPackageConfig(bundleDir string) (string, error) {
-	var found []string
-	_ = filepath.WalkDir(bundleDir, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && entry.Name() == packageConfigName {
-			found = append(found, path)
-		}
-		return nil
-	})
-	if len(found) == 0 {
-		return "", fmt.Errorf("%s: no %s found (open the NVIDIA App once)", bundleDir, packageConfigName)
-	}
-	slices.Sort(found)
-	return found[len(found)-1], nil
-}
-
-// payloadPath is where the interposer looks for a feature's payload under one
-// family's hash.
-func payloadPath(root string, feat feature, hash string) string {
-	file := arch + "_" + hash + ".dll"
-	return filepath.Join(root, feat.name, "versions", strconv.Itoa(feat.ota), "files", file)
+// payloadPath is where the interposer looks for a feature's payload: the
+// feature directory holds it under the version directory and the file is named
+// after the arch and hash, e.g. 1B0_E658703.dll.
+func payloadPath(root string, feat feature) string {
+	file := feat.arch + "_" + feat.hash + feat.ext
+	return filepath.Join(root, feat.name, versionsDir, strconv.Itoa(feat.ota), filesDir, file)
 }
 
 // siblingPayload finds the same payload under the sibling family's hash: both
-// bundles ship identical bytes, so one fills the other's missing file.
-func siblingPayload(root string, feat feature, fam family) (string, bool) {
-	pattern := filepath.Join(root, siblingFeature(feat.name), "versions", strconv.Itoa(feat.ota), "files", "*_"+fam.other+".dll")
-	matches, _ := filepath.Glob(pattern)
+// bundles ship identical bytes, so one fills the other's missing file. The
+// sibling is matched by feature name and payload extension, never by a
+// hard-coded hash.
+func siblingPayload(root string, feat feature) (string, bool) {
+	dir := filepath.Join(root, siblingFeature(feat.name), versionsDir, strconv.Itoa(feat.ota), filesDir)
+	matches, _ := filepath.Glob(filepath.Join(dir, "*"+feat.ext))
 	if len(matches) == 0 {
 		return "", false
 	}
@@ -336,6 +359,29 @@ func siblingFeature(name string) string {
 		return strings.TrimSuffix(name, "_override_0") + "_0"
 	}
 	return strings.TrimSuffix(name, "_0") + "_override_0"
+}
+
+// bundleDir returns the cache directory a package config belongs to. The path
+// is <bundle>/versions/<ota>/files/<arch>_<hash>/<name>, so the bundle is
+// everything before the "versions" component four levels up; anything else is
+// not a config in the layout this package understands.
+func bundleDir(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	if len(parts) < 5 || parts[len(parts)-5] != versionsDir {
+		return ""
+	}
+	return filepath.FromSlash(strings.Join(parts[:len(parts)-5], "/"))
+}
+
+// dirArchHash splits a payload directory name into its arch and hash:
+// "1B0_E658703" -> "1B0", "E658703".
+func dirArchHash(dir string) (arch, hash string) {
+	name := filepath.Base(dir)
+	i := strings.IndexByte(name, '_')
+	if i <= 0 || i == len(name)-1 {
+		return "", ""
+	}
+	return name[:i], name[i+1:]
 }
 
 // exists reports whether path is an existing file.

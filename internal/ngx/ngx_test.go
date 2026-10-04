@@ -7,13 +7,32 @@ import (
 	"testing"
 )
 
-// The two bundles ship the same features under different names: sl_sdk_0
-// (hash E658703) uses sl_<feat>_0, sl_sdk_override_0 (hash E658700) uses
-// sl_<feat>_override_0.
+// The two Streamline bundles ship the same features under different names:
+// sl_sdk_0 (hash E658703) uses sl_<feat>_0, sl_sdk_override_0 (hash E658700)
+// uses sl_<feat>_override_0. Nothing about them is hard-coded in the package:
+// the tests below also build bundles with other names, hashes and arches.
 const (
 	plainConfig    = "sl_common_0, 2.14.0, .dll, sl.common.dll\nsl_reflex_0, 2.14.0, .dll, sl.reflex.dll\n"
 	overrideConfig = "sl_common_override_0, 2.14.0, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.0, .dll, sl.reflex.dll\n"
 )
+
+// bundleSpec is one bundle's package config under the real cache layout:
+// <bundle>/versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt
+type bundleSpec struct {
+	bundle  string // cache directory name, e.g. sl_sdk_0
+	arch    string // e.g. 1B0
+	hash    string // e.g. E658703
+	ota     string // version directory, e.g. 134656
+	content string
+}
+
+func plainSpec(content string) bundleSpec {
+	return bundleSpec{"sl_sdk_0", "1B0", "E658703", "134656", content}
+}
+
+func overrideSpec(content string) bundleSpec {
+	return bundleSpec{"sl_sdk_override_0", "1B0", "E658700", "134656", content}
+}
 
 // writeFile creates a file and its directory, failing the test on error.
 func writeFile(t *testing.T, path, content string) {
@@ -28,12 +47,13 @@ func writeFile(t *testing.T, path, content string) {
 
 // cacheFixture builds a fake NGX cache with the given package configs and
 // payloads, returning its root.
-func cacheFixture(t *testing.T, manifest string, packages map[string]string, payloads []string) string {
+func cacheFixture(t *testing.T, manifest string, bundles []bundleSpec, payloads []string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, manifestName), manifest)
-	for bundle, content := range packages {
-		writeFile(t, filepath.Join(root, bundle, "versions", "1", packageConfigName), content)
+	for _, b := range bundles {
+		dir := filepath.Join(root, b.bundle, versionsDir, b.ota, filesDir, b.arch+"_"+b.hash)
+		writeFile(t, filepath.Join(dir, packageConfigName), b.content)
 	}
 	for _, payload := range payloads {
 		writeFile(t, filepath.Join(root, payload), "payload bytes")
@@ -42,19 +62,19 @@ func cacheFixture(t *testing.T, manifest string, packages map[string]string, pay
 }
 
 // payload builds a cache-relative payload path; ota is the version directory.
-func payload(feature, hash, ota string) string {
-	return filepath.Join(feature, "versions", ota, "files", "1B0_"+hash+".dll")
+func payload(feature, arch, hash, ota string) string {
+	return filepath.Join(feature, versionsDir, ota, filesDir, arch+"_"+hash+".dll")
 }
 
 func TestInspectFindsMissingSections(t *testing.T) {
 	root := cacheFixture(t,
 		"[sl_sdk_0]\r\napp_E658703 = 2.14.0",
-		map[string]string{"sl_sdk_0": plainConfig, "sl_sdk_override_0": overrideConfig},
+		[]bundleSpec{plainSpec(plainConfig), overrideSpec(overrideConfig)},
 		// Only the override family carries payloads: the plain family's files
 		// must be filled from its sibling.
 		[]string{
-			payload("sl_common_override_0", "E658700", "134656"),
-			payload("sl_reflex_override_0", "E658700", "134656"),
+			payload("sl_common_override_0", "1B0", "E658700", "134656"),
+			payload("sl_reflex_override_0", "1B0", "E658700", "134656"),
 		})
 
 	plan, err := Inspect(root)
@@ -81,15 +101,16 @@ func TestInspectFindsMissingSections(t *testing.T) {
 }
 
 func TestInspectUsesOTAHashPath(t *testing.T) {
-	root := cacheFixture(t, "", map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_override_0", "E658700", "134659")})
+	root := cacheFixture(t, "",
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_override_0", "1B0", "E658700", "134659")})
 
 	plan, err := Inspect(root)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
 	// 2.14.3 -> 0x020E03 = 134659, not the 2.14.0 directory.
-	want := filepath.Join("sl_common_0", "versions", "134659", "files", "1B0_E658703.dll")
+	want := filepath.Join("sl_common_0", versionsDir, "134659", filesDir, "1B0_E658703.dll")
 	if len(plan.Copies) != 1 {
 		t.Fatalf("copies = %v, want one", plan.Copies)
 	}
@@ -101,8 +122,8 @@ func TestInspectUsesOTAHashPath(t *testing.T) {
 func TestInspectSkipsSectionsAlreadyPresent(t *testing.T) {
 	root := cacheFixture(t,
 		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0",
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134656")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -120,7 +141,8 @@ func TestInspectSkipsSectionsAlreadyPresent(t *testing.T) {
 }
 
 func TestInspectReportsFeatureWithoutPayload(t *testing.T) {
-	root := cacheFixture(t, "", map[string]string{"sl_sdk_0": "sl_directsr_0, 2.14.0, .dll, sl.directsr.dll\n"}, nil)
+	root := cacheFixture(t, "",
+		[]bundleSpec{plainSpec("sl_directsr_0, 2.14.0, .dll, sl.directsr.dll\n")}, nil)
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -134,16 +156,68 @@ func TestInspectReportsFeatureWithoutPayload(t *testing.T) {
 	}
 }
 
-func TestInspectWarnsOnUnreadableBundle(t *testing.T) {
-	root := cacheFixture(t, "", map[string]string{"sl_sdk_override_0": overrideConfig},
-		[]string{payload("sl_common_override_0", "E658700", "134656")})
+// A bundle whose config has no sl_ rows is not a Streamline bundle (the cache
+// also ships a DLSS payload bundle): it is ignored, not warned about.
+func TestInspectIgnoresNonStreamlineBundle(t *testing.T) {
+	dlss := "dlss, 310.9.0, .bin, nvngx_dlss.dll\ndlssg, 310.9.0, .bin, nvngx_dlssg.dll\n"
+	root := cacheFixture(t, "",
+		[]bundleSpec{
+			{"dlss_override", "160", "E658700", "20318464", dlss},
+			plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n"),
+		},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
 	plan, err := Inspect(root)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "sl_sdk_0") {
-		t.Errorf("warnings = %v, want one about sl_sdk_0", plan.Warnings)
+	if len(plan.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none: the DLSS bundle is simply not Streamline", plan.Warnings)
+	}
+	if len(plan.Sections) != 1 || plan.Sections[0].Feature != "sl_common_0" {
+		t.Errorf("sections = %v, want just sl_common_0", plan.Sections)
+	}
+}
+
+// A cache with no Streamline bundle at all is reported, not silently ignored.
+func TestInspectWarnsWithoutStreamlineBundle(t *testing.T) {
+	dlss := "dlss, 310.9.0, .bin, nvngx_dlss.dll\n"
+	root := cacheFixture(t, "",
+		[]bundleSpec{{"dlss_override", "160", "E658700", "20318464", dlss}}, nil)
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "Streamline") {
+		t.Errorf("warnings = %v, want one about no Streamline bundle", plan.Warnings)
+	}
+	if len(plan.Sections) != 0 {
+		t.Errorf("sections = %v, want none", plan.Sections)
+	}
+}
+
+// Nothing about the bundles is hard-coded: an arbitrary bundle name, hash and
+// arch are discovered from disk and used as-is.
+func TestInspectDiscoversArbitraryBundle(t *testing.T) {
+	root := cacheFixture(t,
+		"[anything]\r\napp_D00DFACE = 1.2.3",
+		[]bundleSpec{{"sl_whatever_7", "2FF", "D00DFACE", "66051", "sl_newfeat_7, 1.2.3, .dll, sl.newfeat.dll\n"}},
+		[]string{payload("sl_newfeat_7", "2FF", "D00DFACE", "66051")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(plan.Additions()) != 1 {
+		t.Fatalf("additions = %v, want one", plan.Additions())
+	}
+	got := plan.Additions()[0]
+	if got.Feature != "sl_newfeat_7" || got.Hash != "D00DFACE" || got.Version != "1.2.3" {
+		t.Errorf("addition = %+v, want sl_newfeat_7 / D00DFACE / 1.2.3", got)
+	}
+	if plan.Changed() != true {
+		t.Error("Changed() = false, want true")
 	}
 }
 
@@ -156,8 +230,8 @@ func TestInspectErrorsWithoutManifest(t *testing.T) {
 func TestApplyAppendsSectionsAndBacksUp(t *testing.T) {
 	initial := "[sl_sdk_0]\r\napp_E658703 = 2.14.0"
 	root := cacheFixture(t, initial,
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134656")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -185,8 +259,8 @@ func TestApplyAppendsSectionsAndBacksUp(t *testing.T) {
 
 func TestApplyIsIdempotent(t *testing.T) {
 	root := cacheFixture(t, "[sl_sdk_override_0]\r\napp_E658700 = 2.14.0",
-		map[string]string{"sl_sdk_override_0": overrideConfig},
-		[]string{payload("sl_common_override_0", "E658700", "134656")})
+		[]bundleSpec{overrideSpec(overrideConfig)},
+		[]string{payload("sl_common_override_0", "1B0", "E658700", "134656")})
 
 	first, err := Inspect(root)
 	if err != nil {
@@ -221,8 +295,8 @@ func TestApplyIsIdempotent(t *testing.T) {
 
 func TestApplyCopiesPayloadFromSibling(t *testing.T) {
 	root := cacheFixture(t, "",
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.0, .dll, sl.common.dll\n", "sl_sdk_override_0": overrideConfig},
-		[]string{payload("sl_common_override_0", "E658700", "134656")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n"), overrideSpec(overrideConfig)},
+		[]string{payload("sl_common_override_0", "1B0", "E658700", "134656")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -243,10 +317,38 @@ func TestApplyCopiesPayloadFromSibling(t *testing.T) {
 	}
 }
 
+// A new GPU arch is discovered from disk, not hard-coded: the payload is filled
+// under that arch's name.
+func TestApplyCopiesPayloadUnderNewArch(t *testing.T) {
+	root := cacheFixture(t, "",
+		[]bundleSpec{
+			{"sl_sdk_0", "1C0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+			{"sl_sdk_override_0", "1C0", "E658700", "134656", overrideConfig},
+		},
+		[]string{payload("sl_common_override_0", "1C0", "E658700", "134656")})
+
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(plan.Copies) != 1 {
+		t.Fatalf("copies = %v, want one", plan.Copies)
+	}
+	if !strings.HasSuffix(plan.Copies[0].Dest, "1C0_E658703.dll") {
+		t.Errorf("dest = %s, want it to end in 1C0_E658703.dll (the discovered arch)", plan.Copies[0].Dest)
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(plan.Copies[0].Dest); err != nil {
+		t.Errorf("payload not written under the discovered arch: %v", err)
+	}
+}
+
 func TestApplyDoesNotOverwriteExistingBackup(t *testing.T) {
 	root := cacheFixture(t, "[sl_sdk_0]",
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134656")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 	writeFile(t, filepath.Join(root, manifestName+".bak"), "older backup")
 
 	plan, err := Inspect(root)
@@ -268,8 +370,8 @@ func TestApplyDoesNotOverwriteExistingBackup(t *testing.T) {
 func TestApplySkipsEverythingWhenNothingToDo(t *testing.T) {
 	initial := "[sl_sdk_0]\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0"
 	root := cacheFixture(t, initial,
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134656")})
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -305,8 +407,26 @@ func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 	if !ok {
 		t.Fatal("parseFeature should match a well-formed row")
 	}
-	if feat.name != "sl_common_override_0" || feat.version != "2.14.3" || feat.ota != 134659 {
-		t.Errorf("feat = %+v, want sl_common_override_0 2.14.3 / 134659", feat)
+	if feat.name != "sl_common_override_0" || feat.version != "2.14.3" || feat.ext != ".dll" || feat.ota != 134659 {
+		t.Errorf("feat = %+v, want sl_common_override_0 2.14.3 / .dll / 134659", feat)
+	}
+}
+
+func TestBundleDirAndArchHash(t *testing.T) {
+	path := filepath.FromSlash("/cache/sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt")
+	if got := bundleDir(path); got != filepath.FromSlash("/cache/sl_sdk_0") {
+		t.Errorf("bundleDir = %q, want /cache/sl_sdk_0", got)
+	}
+	if got := bundleDir("nvngx_package_config.txt"); got != "" {
+		t.Errorf("bundleDir of a bare name = %q, want empty", got)
+	}
+	if arch, hash := dirArchHash(filepath.FromSlash("/x/1B0_E658703")); arch != "1B0" || hash != "E658703" {
+		t.Errorf("dirArchHash = %q,%q want 1B0,E658703", arch, hash)
+	}
+	for _, bad := range []string{"nodash", "_E658703", "1B0_", ""} {
+		if arch, hash := dirArchHash(bad); arch != "" || hash != "" {
+			t.Errorf("dirArchHash(%q) = %q,%q want empty", bad, arch, hash)
+		}
 	}
 }
 
@@ -323,17 +443,20 @@ func TestSiblingFeatureSwapsFamilies(t *testing.T) {
 	}
 }
 
-func TestNewestPackageConfigPicksHighestPath(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "versions", "1", packageConfigName), "")
-	writeFile(t, filepath.Join(root, "versions", "2", packageConfigName), "")
+// A bundle keeps one config per update; the highest path sorts last and wins.
+func TestDiscoverPicksNewestConfig(t *testing.T) {
+	root := cacheFixture(t, "",
+		[]bundleSpec{
+			{"sl_sdk_0", "1B0", "E658703", "1", "sl_common_0, 2.13.0, .dll, sl.common.dll\n"},
+			{"sl_sdk_0", "1B0", "E658703", "2", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+		}, nil)
 
-	got, err := newestPackageConfig(root)
-	if err != nil {
-		t.Fatalf("newestPackageConfig: %v", err)
+	features, warnings := discover(root)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
 	}
-	if !strings.Contains(got, filepath.Join("versions", "2")) {
-		t.Errorf("newestPackageConfig = %s, want the versions/2 copy", got)
+	if len(features) != 1 || features[0].version != "2.14.0" {
+		t.Errorf("features = %+v, want the versions/2 config", features)
 	}
 }
 
@@ -342,8 +465,8 @@ func TestNewestPackageConfigPicksHighestPath(t *testing.T) {
 func TestInspectDetectsStaleVersion(t *testing.T) {
 	root := cacheFixture(t,
 		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0",
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134659")})
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -367,8 +490,8 @@ func TestInspectDetectsStaleVersion(t *testing.T) {
 func TestApplyCorrectsStaleVersionInPlace(t *testing.T) {
 	initial := "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0"
 	root := cacheFixture(t, initial,
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134659")})
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -400,8 +523,8 @@ func TestApplyCorrectsStaleVersionKeepingLineStyle(t *testing.T) {
 	// No spaces around `=`, and an opaque comment above the section.
 	initial := "; NVIDIA cache\r\n[sl_common_0]\r\napp_E658703=2.14.0\r\n"
 	root := cacheFixture(t, initial,
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134659")})
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
 	plan, err := Inspect(root)
 	if err != nil {
@@ -423,8 +546,8 @@ func TestApplyCorrectsStaleVersionKeepingLineStyle(t *testing.T) {
 func TestCurrentVersionIsNotTouched(t *testing.T) {
 	initial := "[sl_common_0]\r\napp_E658703 = 2.14.3\r\n"
 	root := cacheFixture(t, initial,
-		map[string]string{"sl_sdk_0": "sl_common_0, 2.14.3, .dll, sl.common.dll\n"},
-		[]string{payload("sl_common_0", "E658703", "134659")})
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
 	plan, err := Inspect(root)
 	if err != nil {

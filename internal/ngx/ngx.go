@@ -14,10 +14,8 @@
 // root whose rows name sl_ features, and its arch and app hash come from that
 // directory name. A bundle holding several configs contributes the one under
 // the highest numeric OTA directory. A feature name is taken once, from the
-// first bundle (in bundle-name order) that names it.
-//
-// The manifest is parsed, mutated in memory and written back whole, so the
-// format itself lives in one place: manifest.go.
+// first bundle (in bundle-name order) that names it. The manifest's own format
+// lives in one place: manifest.go.
 package ngx
 
 import (
@@ -37,9 +35,7 @@ import (
 )
 
 const (
-	// manifestName is the Streamline OTA manifest the interposer reads.
-	manifestName = "nvngx_config.txt"
-	// packageConfigName is the authoritative feature list inside each bundle.
+	manifestName      = "nvngx_config.txt"
 	packageConfigName = "nvngx_package_config.txt"
 	// versionsDir and filesDir are the two fixed path components between a
 	// cache directory and a payload; the rest (arch, hash) is discovered.
@@ -49,13 +45,14 @@ const (
 
 // Plan is what applying the repair to the NGX cache would do.
 type Plan struct {
-	Root      string    // NGX OTA cache directory
-	Manifest  string    // nvngx_config.txt inside Root
-	Backup    string    // the first write copies the manifest here
+	Root     string // NGX OTA cache directory
+	Manifest string // nvngx_config.txt inside Root
+	Backup   string // the first write copies the manifest here
+
 	Additions []Section // sections the manifest lacks
 	Updates   []Section // sections pinning a version the bundle no longer ships
 	Copies    []Copy    // payloads missing under a hash, filled from the sibling
-	Missing   []string  // features with no payload in their bundle or the sibling
+	Missing   []string  // features with no payload in the cache
 	Warnings  []string  // bundles that could not be examined
 
 	doc *manifest // parsed manifest, mutated by Apply
@@ -71,7 +68,7 @@ type Section struct {
 
 // Copy is one payload file the cache is missing.
 type Copy struct {
-	Feature string // feature whose payload is missing
+	Feature string
 	Source  string
 	Dest    string
 }
@@ -107,9 +104,9 @@ func Inspect(root string) (*Plan, error) {
 	return plan, nil
 }
 
-// add records one feature: a payload copy when its file is missing, and the
-// manifest entry it needs: an appended section, a corrected version, or
-// nothing when the manifest is already current.
+// add records one feature: the payload copy it needs when its file is missing,
+// and the manifest entry it needs (an appended section, a corrected version, or
+// none). A feature whose payload exists nowhere is reported, never guessed.
 func (p *Plan) add(feat feature) {
 	dest := payloadPath(p.Root, feat)
 	if !exists(dest) {
@@ -132,9 +129,9 @@ func (p *Plan) add(feat feature) {
 	}
 }
 
-// Apply copies the missing payloads, backs the manifest up once and writes the
-// corrected sections: new ones appended, outdated versions rewritten in place.
-// It is idempotent: a plan with nothing to do writes nothing.
+// Apply copies the missing payloads, backs the manifest up once, then rewrites
+// it: new sections appended, outdated versions corrected in place. A plan with
+// nothing to do writes nothing.
 func Apply(plan *Plan) error {
 	for _, copy := range plan.Copies {
 		if err := os.MkdirAll(filepath.Dir(copy.Dest), 0o755); err != nil {
@@ -159,7 +156,8 @@ func Apply(plan *Plan) error {
 
 // writeManifest applies the plan's section changes to the parsed manifest and
 // writes it back whole. Only the sections the plan owns are touched: the rest
-// of the file, recognised or not, keeps its bytes.
+// of the file, recognised or not, keeps its bytes. Each section is re-checked
+// against the document before appending, so a reused plan cannot duplicate it.
 func writeManifest(plan *Plan) error {
 	for _, section := range plan.Updates {
 		if b := plan.doc.section(section.Feature); b != nil {
@@ -167,10 +165,13 @@ func writeManifest(plan *Plan) error {
 		}
 	}
 	for _, section := range plan.Additions {
-		b := plan.doc.appendSection(section.Feature)
+		b := plan.doc.section(section.Feature)
+		if b == nil {
+			b = plan.doc.appendSection(section.Feature)
+		}
 		b.set("app_"+section.Hash, section.Version)
 	}
-	if err := os.WriteFile(plan.Manifest, plan.doc.bytes(), 0o644); err != nil {
+	if err := fsutil.WriteFileAtomic(plan.Manifest, plan.doc.bytes(), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", plan.Manifest, err)
 	}
 	return nil
@@ -217,7 +218,8 @@ func discover(root string) ([]feature, []string) {
 // collectConfigs maps every bundle directory to its config under the highest
 // numeric OTA directory, skipping — and warning about — every config whose
 // directory name carries no <arch>_<hash>, so a malformed newer directory
-// never shadows the valid configs beneath it.
+// never shadows the valid configs beneath it. A tie between two identical OTA
+// versions is broken by path so the choice does not depend on walk order.
 func collectConfigs(root string) (map[string]config, []string) {
 	newest := map[string]config{} // bundle dir -> its newest well-formed config
 	var warnings []string
@@ -230,10 +232,15 @@ func collectConfigs(root string) (map[string]config, []string) {
 			return nil
 		}
 		if cfg.arch == "" || cfg.hash == "" {
-			warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", cfg.path))
+			// Only a Streamline config is ours to warn about: the cache also
+			// ships a dlss_override bundle whose rows are not sl_.
+			if feats, err := parseConfig(path, "", ""); err == nil && len(feats) > 0 {
+				warnings = append(warnings, fmt.Sprintf("%s: no <arch>_<hash> in its directory name", cfg.path))
+			}
 			return nil
 		}
-		if current, seen := newest[cfg.bundle]; !seen || cfg.ota > current.ota {
+		if current, seen := newest[cfg.bundle]; !seen || cfg.ota > current.ota ||
+			(cfg.ota == current.ota && cfg.path < current.path) {
 			newest[cfg.bundle] = cfg
 		}
 		return nil
@@ -242,20 +249,21 @@ func collectConfigs(root string) (map[string]config, []string) {
 }
 
 // configFrom parses a package config path in the cache layout
-// <bundle>/versions/<ota>/files/<arch>_<hash>/<name>. A non-numeric <ota>
-// sorts lowest; ok is false when the path is not in that layout.
+// <bundle>/versions/<ota>/files/<arch>_<hash>/<name>. ok is false when the path
+// is not in that layout; a non-numeric <ota> sorts lowest.
 func configFrom(path string) (config, bool) {
 	parts := strings.Split(filepath.ToSlash(path), "/")
-	if len(parts) < 5 || parts[len(parts)-5] != versionsDir {
+	n := len(parts)
+	if n < 5 || parts[n-5] != versionsDir || parts[n-3] != filesDir {
 		return config{}, false
 	}
-	ota, err := strconv.Atoi(parts[len(parts)-4])
+	ota, err := strconv.Atoi(parts[n-4])
 	if err != nil {
 		ota = -1
 	}
-	arch, hash := splitArchHash(parts[len(parts)-2])
+	arch, hash := splitArchHash(parts[n-2])
 	return config{
-		bundle: filepath.FromSlash(strings.Join(parts[:len(parts)-5], "/")),
+		bundle: filepath.FromSlash(strings.Join(parts[:n-5], "/")),
 		ota:    ota,
 		arch:   arch,
 		hash:   hash,
@@ -288,27 +296,28 @@ type feature struct {
 //	sl_common_override_0, 2.14.0, .dll, sl.common.dll
 var featureLine = regexp.MustCompile(`^\x{FEFF}?\s*(sl_[a-z0-9_]+)\s*,\s*(\d+\.\d+\.\d+)\s*,\s*(\.[A-Za-z0-9]+)`)
 
-// parseFeature reads one feature row; anything else yields false.
+// parseFeature reads one feature row; anything else yields false. The version
+// is re-emitted canonically (002.14.00 -> 2.14.0): the OTA directory is numeric,
+// so two spellings of a version must never reach the manifest as two versions.
 func parseFeature(line string) (feature, bool) {
 	m := featureLine.FindStringSubmatch(line)
 	if m == nil {
 		return feature{}, false
 	}
+	// The regexp pins the version to three dot-separated digit runs.
 	parts := strings.Split(m[2], ".")
-	if len(parts) != 3 {
-		return feature{}, false
-	}
 	ota := 0
-	for _, part := range parts {
+	for i, part := range parts {
 		n, err := strconv.Atoi(part)
 		if err != nil || n > 0xFF {
 			return feature{}, false
 		}
+		parts[i] = strconv.Itoa(n)
 		ota = ota<<8 | n
 	}
 	return feature{
 		name:    m[1],
-		version: m[2],
+		version: strings.Join(parts, "."),
 		ext:     m[3],
 		ota:     ota,
 	}, true
@@ -343,11 +352,11 @@ func payloadPath(root string, feat feature) string {
 
 // siblingPayload finds the same payload under the sibling feature's directory:
 // both bundles ship identical bytes, so one fills the other's missing file. The
-// sibling payload is matched by feature name and extension, never by a
-// hard-coded hash; the first match in sorted order wins.
+// arch is pinned so a 160 payload can never land under an 1B0 name; the hash is
+// never hard-coded, and the first match in sorted order wins.
 func siblingPayload(root string, feat feature) (string, bool) {
 	dir := filepath.Join(root, siblingFeature(feat.name), versionsDir, strconv.Itoa(feat.ota), filesDir)
-	matches, _ := filepath.Glob(filepath.Join(dir, "*"+feat.ext))
+	matches, _ := filepath.Glob(filepath.Join(dir, feat.arch+"_*"+feat.ext))
 	if len(matches) == 0 {
 		return "", false
 	}

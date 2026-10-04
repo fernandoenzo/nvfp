@@ -323,6 +323,62 @@ func TestApplyDoesNotOverwriteExistingBackup(t *testing.T) {
 	}
 }
 
+// The sibling bundle carries payloads for more than one arch: only the one
+// matching the destination's arch may fill the gap — another arch's bytes
+// under an 1B0 name would silently corrupt the cache.
+func TestApplySiblingCopyKeepsTheArch(t *testing.T) {
+	root := cacheFixture(t, "",
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{
+			payload("sl_common_override_0", "160", "E658700", "134656"),
+			payload("sl_common_override_0", "1B0", "E658700", "134656"),
+		})
+
+	plan := inspectFixture(t, root)
+	if len(plan.Copies) != 1 {
+		t.Fatalf("copies = %+v, want one", plan.Copies)
+	}
+	if !strings.Contains(plan.Copies[0].Source, "1B0_") {
+		t.Errorf("copy source %s should carry the destination's 1B0 arch", plan.Copies[0].Source)
+	}
+
+	// The sibling has no payload for the destination's arch at all: the feature
+	// must be reported, never filled with the wrong arch.
+	other := cacheFixture(t, "",
+		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"}},
+		[]string{payload("sl_common_override_0", "160", "E658700", "134656")})
+	otherPlan := inspectFixture(t, other)
+	if len(otherPlan.Copies) != 0 {
+		t.Errorf("copies = %+v, want none: the sibling has no 1B0 payload", otherPlan.Copies)
+	}
+	if len(otherPlan.Missing) != 1 || otherPlan.Missing[0] != "sl_common_0" {
+		t.Errorf("missing = %v, want [sl_common_0]", otherPlan.Missing)
+	}
+}
+
+// Applying the same plan twice must not duplicate a section: the plan is
+// re-checked against its document before every append.
+func TestApplyTwiceOnTheSamePlanIsIdempotent(t *testing.T) {
+	root := cacheFixture(t, "[sl_sdk_0]",
+		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
+		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
+
+	plan := inspectFixture(t, root)
+	if err := Apply(plan); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatalf("second Apply: %v", err)
+	}
+	data, err := os.ReadFile(plan.Manifest)
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	if got := strings.Count(string(data), "[sl_common_0]"); got != 1 {
+		t.Errorf("the section appears %d times, want 1:\n%s", got, data)
+	}
+}
+
 func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 	for _, line := range []string{
 		"",
@@ -345,6 +401,12 @@ func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 	if feat.name != "sl_common_override_0" || feat.version != "2.14.3" || feat.ext != ".dll" || feat.ota != 134659 {
 		t.Errorf("feat = %+v, want sl_common_override_0 2.14.3 / .dll / 134659", feat)
 	}
+	// The OTA directory is numeric, so two spellings of a version must never
+	// reach the manifest as two versions: leading zeros are canonicalised.
+	padded, ok := parseFeature("sl_common_0, 002.14.00, .dll, sl.common.dll")
+	if !ok || padded.version != "2.14.0" || padded.ota != 134656 {
+		t.Errorf("padded = %+v, %v; want 2.14.0 / 134656", padded, ok)
+	}
 }
 
 func TestConfigFromAndSplitArchHash(t *testing.T) {
@@ -358,6 +420,11 @@ func TestConfigFromAndSplitArchHash(t *testing.T) {
 	}
 	if _, ok := configFrom("nvngx_package_config.txt"); ok {
 		t.Error("configFrom of a bare name should not be ok")
+	}
+	// The `files` component is part of the layout: a path without it is not a
+	// bundle config, whatever else looks right.
+	if _, ok := configFrom(filepath.FromSlash("/cache/sl_sdk_0/versions/134656/not-files/1B0_E658703/nvngx_package_config.txt")); ok {
+		t.Error("configFrom accepted a path without the files component")
 	}
 	// A non-numeric OTA does not parse, but the config is still recognised and
 	// sorts lowest.
@@ -403,6 +470,24 @@ func TestDiscoverPicksNewestConfig(t *testing.T) {
 	}
 }
 
+// Two payload directories under the same OTA version are a tie the walk order
+// must not decide: the lexicographically first path wins, run after run.
+func TestDiscoverBreaksOTATiesDeterministically(t *testing.T) {
+	specs := []bundleSpec{
+		{"sl_sdk_0", "160", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+		{"sl_sdk_0", "1B0", "E658703", "134656", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+	}
+	for range 5 {
+		features, warnings := discover(cacheFixture(t, "", specs, nil))
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %v, want none", warnings)
+		}
+		if len(features) != 1 || features[0].arch != "160" {
+			t.Fatalf("features = %+v, want the 160 config (first path wins)", features)
+		}
+	}
+}
+
 // A malformed config directory never shadows its bundle's valid configs: the
 // newest usable one wins, and the malformed one is warned about.
 func TestDiscoverSkipsMalformedConfigDir(t *testing.T) {
@@ -418,6 +503,25 @@ func TestDiscoverSkipsMalformedConfigDir(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "no <arch>_<hash>") {
 		t.Errorf("warnings = %v, want one about the malformed directory name", warnings)
+	}
+}
+
+// A bundle whose config has no sl_ rows is not Streamline, so an odd directory
+// name there is not the user's business — the DLSS bundles ship their own
+// layouts and must not be warned about.
+func TestDiscoverMalformedNonStreamlineDirIsNotWarned(t *testing.T) {
+	root := cacheFixture(t, "",
+		[]bundleSpec{
+			{"dlss_override", "nodash", "", "20318464", "dlss, 310.9.0, .bin, nvngx_dlss.dll\n"},
+			plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n"),
+		}, nil)
+
+	features, warnings := discover(root)
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none: the DLSS bundle is not Streamline", warnings)
+	}
+	if len(features) != 1 || features[0].name != "sl_common_0" {
+		t.Errorf("features = %+v, want just sl_common_0", features)
 	}
 }
 

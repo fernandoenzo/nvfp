@@ -48,3 +48,50 @@ func TestCopyFileOverwritesDestination(t *testing.T) {
 		t.Error("CopyFile created a destination despite a missing source")
 	}
 }
+
+func TestWriteFileAtomicReplacesAndLeavesNoTemporary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nvngx_config.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("writing seed file: %v", err)
+	}
+
+	if err := WriteFileAtomic(path, []byte("new content"), 0o644); err != nil {
+		t.Fatalf("WriteFileAtomic: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	if string(got) != "new content" {
+		t.Errorf("file = %q, want %q", got, "new content")
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("the temporary file survived the rename: %v", err)
+	}
+
+	// The rename must also create a file that did not exist yet.
+	fresh := filepath.Join(dir, "sub", "fresh.txt")
+	if err := os.MkdirAll(filepath.Dir(fresh), 0o755); err != nil {
+		t.Fatalf("creating directory: %v", err)
+	}
+	if err := WriteFileAtomic(fresh, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFileAtomic on a fresh path: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("fresh file not created: %v", err)
+	}
+}
+
+// A failed write must leave the original file alone and no temporary behind.
+func TestWriteFileAtomicFailureLeavesNoTemporary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing", "nvngx_config.txt")
+
+	if err := WriteFileAtomic(path, []byte("new"), 0o644); err == nil {
+		t.Fatal("WriteFileAtomic into a missing directory should fail")
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("a temporary file was left behind: %v", err)
+	}
+}

@@ -901,7 +901,7 @@ func TestSLOverride(t *testing.T) {
 			}
 		}
 		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
-			t.Errorf("the plain family payload was not filled from the sibling: %v", err)
+			t.Errorf("the plain bundle payload was not filled from the sibling: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); err != nil {
 			t.Errorf("no backup was written: %v", err)
@@ -961,6 +961,33 @@ func TestSLOverride(t *testing.T) {
 		}
 		if !strings.Contains(output, "nothing to do") {
 			t.Errorf("the second run did not report that there was nothing to do:\n%s", output)
+		}
+	})
+
+	// A payload copy is real work: the report must never claim there was
+	// nothing to do while it filled a missing file.
+	t.Run("copy only is not nothing to do", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixtureFile(t, root, "nvngx_config.txt",
+			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0")
+		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
+			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
+		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/1B0_E658700.dll", "payload bytes")
+		withNGXRoot(t, root, false)
+
+		output := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+		})
+		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
+			t.Fatalf("payload not copied from the sibling: %v", err)
+		}
+		if strings.Contains(output, "nothing to do") {
+			t.Errorf("the report claims nothing to do after copying a payload:\n%s", output)
+		}
+		if !strings.Contains(output, "payload restored from the sibling bundle") {
+			t.Errorf("the report does not name the payload copy:\n%s", output)
 		}
 	})
 

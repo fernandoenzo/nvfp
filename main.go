@@ -271,9 +271,10 @@ func printSLResult(plan *ngx.Plan) {
 	for _, section := range plan.Updates {
 		fmt.Printf("  ✓ updated [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
 	}
-	if len(plan.Additions) == 0 && len(plan.Updates) == 0 {
+	if !plan.Changed() {
 		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
-	} else {
+	} else if len(plan.Additions) > 0 || len(plan.Updates) > 0 {
+		// The .bak is written only when the manifest itself changes.
 		fmt.Printf("  backup: %s\n", plan.Backup)
 	}
 	warnMissingFeatures(plan)

@@ -36,9 +36,11 @@ type block struct {
 // line is one line inside a block: a key/value pair, or an opaque line kept
 // verbatim (a comment, a blank line, a stray token).
 type line struct {
-	key    string // empty for an opaque line
-	value  string
-	prefix string // literal text before the value: indentation, key, "=", spaces
+	key   string // empty for an opaque line
+	value string
+	// prefix is the literal text before the value: indentation, key, "=",
+	// spaces. Keeping it is what makes an edit change only the value's bytes.
+	prefix string
 	raw    string // the line as read, for opaque lines
 }
 
@@ -66,8 +68,8 @@ func parseManifest(data []byte) (*manifest, error) {
 	return m, nil
 }
 
-// splitLines normalises every tolerated line ending to "\n" and returns the
-// lines without the trailing empty one.
+// splitLines normalises every tolerated line ending to "\n" and drops the
+// trailing empty line left by the final terminator.
 func splitLines(text string) []string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")

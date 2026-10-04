@@ -113,12 +113,15 @@ the cache is walked for `versions/<ota>/files/<arch>_<hash>/nvngx_package_config
 (the config under the highest numeric OTA directory wins), the section name is the
 row's first field, the version its second, and the arch and app hash come from
 that directory name. It restores a payload that exists
-under only one hash from the sibling bundle (identical bytes), appends the missing
-`[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a section
-that pins an outdated version** — the interposer resolves a feature to
+under only one hash from the sibling bundle (identical bytes, matched under the
+same arch so the bytes can never come from another GPU's build), appends the
+missing `[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a
+section that pins an outdated version** — the interposer resolves a feature to
 `versions\<ota>`, so leaving a stale version in place points it at a directory
 the cache may no longer have. The first write copies the manifest to
-`nvngx_config.txt.bak` and that backup is never overwritten.
+`nvngx_config.txt.bak`, that backup is never overwritten, and the manifest
+itself is replaced atomically (temporary sibling + rename), so it is never seen
+half-written.
 
 The manifest is parsed, changed in memory and written back whole, which is what
 makes line endings and a stray BOM a non-issue: UTF-8 input with any line

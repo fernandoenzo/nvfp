@@ -150,7 +150,7 @@ func (m *manifest) endsWithBlank() bool {
 }
 
 // get returns the value of a key, ignoring surrounding whitespace, and whether
-// it was found.
+// it was found. On a duplicate key the first line wins, as does set.
 func (b *block) get(key string) (string, bool) {
 	for _, line := range b.lines {
 		if line.key == key {
@@ -163,8 +163,8 @@ func (b *block) get(key string) (string, bool) {
 // set writes key = value, replacing the value in place when the key exists or
 // adding the line at the end when it does not. It reports whether anything
 // changed, so applying an already-correct manifest writes nothing. Comparison
-// ignores surrounding whitespace, and the trailing whitespace of the existing
-// line is kept.
+// ignores surrounding whitespace, the trailing whitespace of the existing line
+// is kept, and on a duplicate key the first line wins.
 func (b *block) set(key, value string) bool {
 	for i := range b.lines {
 		line := &b.lines[i]
@@ -207,7 +207,9 @@ func parseLine(text string) line {
 	if i <= 0 {
 		return line{raw: text}
 	}
-	key := strings.TrimRight(text[:i], " \t")
+	// Both sides trim like get() and set() compare, so an indented key is
+	// found and rewritten in place instead of being appended a second time.
+	key := strings.TrimSpace(text[:i])
 	if key == "" {
 		return line{raw: text}
 	}
@@ -216,7 +218,8 @@ func parseLine(text string) line {
 	return line{key: key, prefix: text[:i+1+spaces], value: rest[spaces:]}
 }
 
-// decode reads the input as UTF-8 text, stripping a BOM when present. NUL
+// decode reads the input as UTF-8 text, stripping a BOM when present. A BOM is
+// not restored on write: bytes() always emits canonical UTF-8 without one. NUL
 // bytes mean the file is not the text the interposer reads, so they are
 // refused rather than guessed.
 func decode(data []byte) (string, error) {

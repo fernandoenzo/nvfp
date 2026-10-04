@@ -849,117 +849,171 @@ func slFixture(t *testing.T) string {
 		filepath.Join("sl_common_override_0", "versions", "134656", "files", "1B0_E658700.dll"):                      "payload bytes",
 	}
 	for name, content := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("MkdirAll %s: %v", path, err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatalf("writing %s: %v", path, err)
-		}
+		writeFixtureFile(t, root, name, content)
 	}
 	return root
 }
 
-func TestSLOverrideFlagSkipsManifestResolution(t *testing.T) {
-	// --sl-override is a pure local file operation: with an invalid
-	// --games-json it still repairs, proving run() never resolves the manifest.
-	root := slFixture(t)
-	oldRoot := ngxRoot
-	oldFlag, oldPath := slOverrideFlag, gamesJSONPath
-	oldDry := dryRun
-	defer func() { ngxRoot, slOverrideFlag, gamesJSONPath, dryRun = oldRoot, oldFlag, oldPath, oldDry }()
-	ngxRoot = func() (string, error) { return root, nil }
-	slOverrideFlag = true
-	gamesJSONPath = filepath.Join(root, "does-not-exist.json")
-	dryRun = false
-
-	if err := run(nil, nil); err != nil {
-		t.Fatalf("run() with --sl-override error: %v", err)
+// writeFixtureFile writes a fixture file under root, creating its parents.
+func writeFixtureFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("creating %s: %v", filepath.Dir(path), err)
 	}
-
-	manifest, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	for _, want := range []string{"[sl_common_0]", "app_E658703 = 2.14.0", "[sl_common_override_0]", "app_E658700 = 2.14.0"} {
-		if !strings.Contains(string(manifest), want) {
-			t.Errorf("manifest missing %q:\n%s", want, manifest)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
-		t.Errorf("the plain family payload was not filled from the sibling: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); err != nil {
-		t.Errorf("no backup was written: %v", err)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-func TestSLOverrideDryRunWritesNothing(t *testing.T) {
-	root := slFixture(t)
-	oldRoot := ngxRoot
-	oldFlag := slOverrideFlag
-	oldDry := dryRun
-	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
+// withNGXRoot points the --sl-override flow at a fixture directory, turns the
+// flag on and restores every global afterwards.
+func withNGXRoot(t *testing.T, root string, dry bool) {
+	t.Helper()
+	oldRoot, oldFlag, oldDry, oldJSON := ngxRoot, slOverrideFlag, dryRun, gamesJSONPath
+	t.Cleanup(func() { ngxRoot, slOverrideFlag, dryRun, gamesJSONPath = oldRoot, oldFlag, oldDry, oldJSON })
 	ngxRoot = func() (string, error) { return root, nil }
-	slOverrideFlag = true
-	dryRun = true
-
-	before, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	output := captureStdout(t, func() {
-		if err := run(nil, nil); err != nil {
-			t.Fatalf("run() with --sl-override --dry-run error: %v", err)
-		}
-	})
-	after, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	if string(before) != string(after) {
-		t.Errorf("--dry-run modified the manifest")
-	}
-	if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); !os.IsNotExist(err) {
-		t.Errorf("--dry-run wrote a backup: %v", err)
-	}
-	if !strings.Contains(output, "would add [sl_common_0]") {
-		t.Errorf("dry-run output does not describe the pending section:\n%s", output)
-	}
+	slOverrideFlag, dryRun = true, dry
 }
 
-func TestSLOverrideIsIdempotent(t *testing.T) {
-	root := slFixture(t)
-	oldRoot := ngxRoot
-	oldFlag := slOverrideFlag
-	oldDry := dryRun
-	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
-	ngxRoot = func() (string, error) { return root, nil }
-	slOverrideFlag = true
-	dryRun = false
+// TestSLOverride drives the whole --sl-override flow: skipping the games
+// manifest, --dry-run, idempotence, and the stale/missing repair end to end.
+// Each subtest builds its own cache fixture and its own global seam.
+func TestSLOverride(t *testing.T) {
+	t.Run("skips manifest resolution", func(t *testing.T) {
+		// --sl-override is a pure local file operation: with an invalid
+		// --games-json it still repairs, proving run() never resolves the manifest.
+		root := slFixture(t)
+		withNGXRoot(t, root, false)
+		gamesJSONPath = filepath.Join(root, "does-not-exist.json")
 
-	if err := run(nil, nil); err != nil {
-		t.Fatalf("first run() error: %v", err)
-	}
-	first, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	output := captureStdout(t, func() {
 		if err := run(nil, nil); err != nil {
-			t.Fatalf("second run() error: %v", err)
+			t.Fatalf("run() with --sl-override error: %v", err)
+		}
+
+		manifest, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		for _, want := range []string{"[sl_common_0]", "app_E658703 = 2.14.0", "[sl_common_override_0]", "app_E658700 = 2.14.0"} {
+			if !strings.Contains(string(manifest), want) {
+				t.Errorf("manifest missing %q:\n%s", want, manifest)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
+			t.Errorf("the plain family payload was not filled from the sibling: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); err != nil {
+			t.Errorf("no backup was written: %v", err)
 		}
 	})
-	second, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	if string(first) != string(second) {
-		t.Errorf("the second run changed the manifest:\n%q\n%q", first, second)
-	}
-	if !strings.Contains(output, "nothing to do") {
-		t.Errorf("the second run did not report that there was nothing to do:\n%s", output)
-	}
+
+	t.Run("dry run writes nothing", func(t *testing.T) {
+		root := slFixture(t)
+		withNGXRoot(t, root, true)
+
+		before, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		output := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run() with --sl-override --dry-run error: %v", err)
+			}
+		})
+		after, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		if string(before) != string(after) {
+			t.Error("--dry-run modified the manifest")
+		}
+		if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); !os.IsNotExist(err) {
+			t.Errorf("--dry-run wrote a backup: %v", err)
+		}
+		if !strings.Contains(output, "would add [sl_common_0]") {
+			t.Errorf("dry-run output does not describe the pending section:\n%s", output)
+		}
+	})
+
+	t.Run("idempotent", func(t *testing.T) {
+		root := slFixture(t)
+		withNGXRoot(t, root, false)
+
+		if err := run(nil, nil); err != nil {
+			t.Fatalf("first run() error: %v", err)
+		}
+		first, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		output := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("second run() error: %v", err)
+			}
+		})
+		second, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		if string(first) != string(second) {
+			t.Errorf("the second run changed the manifest:\n%q\n%q", first, second)
+		}
+		if !strings.Contains(output, "nothing to do") {
+			t.Errorf("the second run did not report that there was nothing to do:\n%s", output)
+		}
+	})
+
+	// The whole repair in one run: a comment, a per-feature section pinning an
+	// outdated version, sections missing entirely, and payloads missing under
+	// one hash. Regression test for the stale-version gap inherited from the
+	// PowerShell.
+	t.Run("stale and missing", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixtureFile(t, root, "nvngx_config.txt",
+			"; NVIDIA NGX OTA cache\r\n"+
+				"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n"+
+				"[sl_common_0]\r\napp_E658703=2.14.0\r\n")
+		writeFixtureFile(t, root, "sl_sdk_0/versions/134659/files/1B0_E658703/nvngx_package_config.txt",
+			"sl_common_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_0, 2.14.3, .dll, sl.reflex.dll\n")
+		writeFixtureFile(t, root, "sl_sdk_override_0/versions/134659/files/1B0_E658700/nvngx_package_config.txt",
+			"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
+		writeFixtureFile(t, root, "sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
+		writeFixtureFile(t, root, "sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")
+		withNGXRoot(t, root, false)
+
+		output := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+		})
+		got, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if err != nil {
+			t.Fatalf("reading manifest: %v", err)
+		}
+		// The comment survives, the stale section is corrected keeping its `=`
+		// spacing, and the missing sections are appended blank-line separated.
+		want := "; NVIDIA NGX OTA cache\r\n" +
+			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n" +
+			"[sl_common_0]\r\napp_E658703=2.14.3\r\n\r\n" +
+			"[sl_reflex_0]\r\napp_E658703 = 2.14.3\r\n\r\n" +
+			"[sl_common_override_0]\r\napp_E658700 = 2.14.3\r\n\r\n" +
+			"[sl_reflex_override_0]\r\napp_E658700 = 2.14.3\r\n"
+		if string(got) != want {
+			t.Errorf("manifest mismatch\n got %q\nwant %q", got, want)
+		}
+		if !strings.Contains(output, "updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3") {
+			t.Errorf("output does not report the version correction:\n%s", output)
+		}
+		for _, payload := range []string{
+			"sl_common_0/versions/134659/files/1B0_E658703.dll",
+			"sl_reflex_0/versions/134659/files/1B0_E658703.dll",
+		} {
+			if _, err := os.Stat(filepath.Join(root, payload)); err != nil {
+				t.Errorf("payload not filled from the sibling: %s: %v", payload, err)
+			}
+		}
+	})
 }
 
 // captureStdout runs fn with stdout redirected and returns what it printed.
@@ -979,69 +1033,4 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("reading captured stdout: %v", err)
 	}
 	return buf.String()
-}
-
-// TestSLOverrideStaleAndMissing covers the whole repair in one run: a manifest
-// with a comment, a per-feature section pinning an outdated version, sections
-// missing entirely, and payloads missing under one hash. It is also the
-// regression test for the stale-version gap inherited from the PowerShell.
-func TestSLOverrideStaleAndMissing(t *testing.T) {
-	root := t.TempDir()
-	writeFile := func(rel, content string) {
-		t.Helper()
-		path := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeFile("nvngx_config.txt",
-		"; NVIDIA NGX OTA cache\r\n"+
-			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n"+
-			"[sl_common_0]\r\napp_E658703=2.14.0\r\n")
-	writeFile("sl_sdk_0/versions/134659/files/1B0_E658703/nvngx_package_config.txt",
-		"sl_common_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_0, 2.14.3, .dll, sl.reflex.dll\n")
-	writeFile("sl_sdk_override_0/versions/134659/files/1B0_E658700/nvngx_package_config.txt",
-		"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
-	writeFile("sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
-	writeFile("sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")
-
-	oldRoot, oldFlag, oldDry := ngxRoot, slOverrideFlag, dryRun
-	defer func() { ngxRoot, slOverrideFlag, dryRun = oldRoot, oldFlag, oldDry }()
-	ngxRoot = func() (string, error) { return root, nil }
-	slOverrideFlag, dryRun = true, false
-
-	output := captureStdout(t, func() {
-		if err := run(nil, nil); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-	})
-	got, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-	if err != nil {
-		t.Fatalf("reading manifest: %v", err)
-	}
-	// The comment survives, the stale section is corrected keeping its `=`
-	// spacing, and the missing sections are appended blank-line separated.
-	want := "; NVIDIA NGX OTA cache\r\n" +
-		"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n" +
-		"[sl_common_0]\r\napp_E658703=2.14.3\r\n\r\n" +
-		"[sl_reflex_0]\r\napp_E658703 = 2.14.3\r\n\r\n" +
-		"[sl_common_override_0]\r\napp_E658700 = 2.14.3\r\n\r\n" +
-		"[sl_reflex_override_0]\r\napp_E658700 = 2.14.3\r\n"
-	if string(got) != want {
-		t.Errorf("manifest mismatch\n got %q\nwant %q", got, want)
-	}
-	if !strings.Contains(output, "updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3") {
-		t.Errorf("output does not report the version correction:\n%s", output)
-	}
-	for _, payload := range []string{
-		"sl_common_0/versions/134659/files/1B0_E658703.dll",
-		"sl_reflex_0/versions/134659/files/1B0_E658703.dll",
-	} {
-		if _, err := os.Stat(filepath.Join(root, payload)); err != nil {
-			t.Errorf("payload not filled from the sibling: %s: %v", payload, err)
-		}
-	}
 }

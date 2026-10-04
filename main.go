@@ -245,10 +245,10 @@ func printSLPlan(plan *ngx.Plan) {
 	for _, cp := range plan.Copies {
 		fmt.Printf("  → would copy %s\n        to %s\n", cp.Source, cp.Dest)
 	}
-	for _, section := range plan.Additions() {
+	for _, section := range plan.Additions {
 		fmt.Printf("  → would add [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
 	}
-	for _, section := range plan.Updates() {
+	for _, section := range plan.Updates {
 		fmt.Printf("  → would update [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
 	}
 	if !plan.Changed() {
@@ -264,14 +264,13 @@ func printSLResult(plan *ngx.Plan) {
 	for _, cp := range plan.Copies {
 		fmt.Printf("  ✓ %s payload restored from the sibling bundle\n", cp.Feature)
 	}
-	additions, updates := plan.Additions(), plan.Updates()
-	for _, section := range additions {
+	for _, section := range plan.Additions {
 		fmt.Printf("  ✓ added [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
 	}
-	for _, section := range updates {
+	for _, section := range plan.Updates {
 		fmt.Printf("  ✓ updated [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
 	}
-	if len(additions) == 0 && len(updates) == 0 {
+	if len(plan.Additions) == 0 && len(plan.Updates) == 0 {
 		fmt.Println("  ⊘ nothing to do: every per-feature section is present and current")
 	} else {
 		fmt.Printf("  backup: %s\n", plan.Backup)

@@ -66,7 +66,17 @@ func payload(feature, arch, hash, ota string) string {
 	return filepath.Join(feature, versionsDir, ota, filesDir, arch+"_"+hash+".dll")
 }
 
-func TestInspectFindsMissingSections(t *testing.T) {
+// inspectFixture inspects a cache and fails the test on error.
+func inspectFixture(t *testing.T, root string) *Plan {
+	t.Helper()
+	plan, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	return plan
+}
+
+func TestInspectFindsMissingSectionsAndCopies(t *testing.T) {
 	root := cacheFixture(t,
 		"[sl_sdk_0]\r\napp_E658703 = 2.14.0",
 		[]bundleSpec{plainSpec(plainConfig), overrideSpec(overrideConfig)},
@@ -77,39 +87,31 @@ func TestInspectFindsMissingSections(t *testing.T) {
 			payload("sl_reflex_override_0", "1B0", "E658700", "134656"),
 		})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
-	if got := len(plan.Sections); got != 4 {
-		t.Fatalf("sections = %d, want 4", got)
+	plan := inspectFixture(t, root)
+	if got := len(plan.Additions); got != 4 {
+		t.Fatalf("additions = %d, want 4", got)
 	}
 	if got := len(plan.Copies); got != 2 {
 		t.Fatalf("copies = %d, want 2", len(plan.Copies))
 	}
 	for _, copy := range plan.Copies {
-		if !strings.Contains(copy.Source, "sl_common_override_0") && !strings.Contains(copy.Source, "sl_reflex_override_0") {
+		if !strings.Contains(copy.Source, "_override_0") {
 			t.Errorf("copy source %s should come from the override family", copy.Source)
 		}
-	}
-	if got := len(plan.Additions()); got != 4 {
-		t.Fatalf("additions = %d, want 4", got)
 	}
 	if !plan.Changed() {
 		t.Error("Changed() = false, want true")
 	}
 }
 
+// The payload destination is keyed by the row's version in its numeric OTA
+// form: 2.14.3 -> 0x020E03 = 134659, not the 2.14.0 directory.
 func TestInspectUsesOTAHashPath(t *testing.T) {
 	root := cacheFixture(t, "",
 		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
 		[]string{payload("sl_common_override_0", "1B0", "E658700", "134659")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
-	// 2.14.3 -> 0x020E03 = 134659, not the 2.14.0 directory.
+	plan := inspectFixture(t, root)
 	want := filepath.Join("sl_common_0", versionsDir, "134659", filesDir, "1B0_E658703.dll")
 	if len(plan.Copies) != 1 {
 		t.Fatalf("copies = %v, want one", plan.Copies)
@@ -125,18 +127,15 @@ func TestInspectSkipsSectionsAlreadyPresent(t *testing.T) {
 		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
-	if got := plan.Additions(); len(got) != 0 {
-		t.Errorf("additions = %v, want none", got)
-	}
-	if plan.Changed() {
-		t.Error("Changed() = true, want false")
+	plan := inspectFixture(t, root)
+	if len(plan.Additions) != 0 || len(plan.Updates) != 0 {
+		t.Errorf("additions = %v, updates = %v, want none", plan.Additions, plan.Updates)
 	}
 	if len(plan.Copies) != 0 {
 		t.Errorf("copies = %v, want none: the payload already exists", plan.Copies)
+	}
+	if plan.Changed() {
+		t.Error("Changed() = true, want false")
 	}
 }
 
@@ -144,15 +143,13 @@ func TestInspectReportsFeatureWithoutPayload(t *testing.T) {
 	root := cacheFixture(t, "",
 		[]bundleSpec{plainSpec("sl_directsr_0, 2.14.0, .dll, sl.directsr.dll\n")}, nil)
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if len(plan.Missing) != 1 || plan.Missing[0] != "sl_directsr_0" {
 		t.Errorf("missing = %v, want [sl_directsr_0]", plan.Missing)
 	}
-	if len(plan.Sections) != 0 {
-		t.Errorf("sections = %v, want none: no payload means no section", plan.Sections)
+	// No payload means no section can be repaired.
+	if len(plan.Additions) != 0 || len(plan.Updates) != 0 {
+		t.Errorf("additions = %v, updates = %v, want none", plan.Additions, plan.Updates)
 	}
 }
 
@@ -167,33 +164,31 @@ func TestInspectIgnoresNonStreamlineBundle(t *testing.T) {
 		},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if len(plan.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none: the DLSS bundle is simply not Streamline", plan.Warnings)
 	}
-	if len(plan.Sections) != 1 || plan.Sections[0].Feature != "sl_common_0" {
-		t.Errorf("sections = %v, want just sl_common_0", plan.Sections)
+	if len(plan.Additions) != 1 || plan.Additions[0].Feature != "sl_common_0" {
+		t.Errorf("additions = %v, want just sl_common_0", plan.Additions)
 	}
 }
 
-// A cache with no Streamline bundle at all is reported, not silently ignored.
+// A cache with no Streamline bundle at all is reported, with the actionable
+// hint that the NVIDIA App has to run once to populate the cache.
 func TestInspectWarnsWithoutStreamlineBundle(t *testing.T) {
 	dlss := "dlss, 310.9.0, .bin, nvngx_dlss.dll\n"
 	root := cacheFixture(t, "",
 		[]bundleSpec{{"dlss_override", "160", "E658700", "20318464", dlss}}, nil)
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
+	plan := inspectFixture(t, root)
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want one", plan.Warnings)
 	}
-	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "Streamline") {
-		t.Errorf("warnings = %v, want one about no Streamline bundle", plan.Warnings)
+	if !strings.Contains(plan.Warnings[0], "Streamline") || !strings.Contains(plan.Warnings[0], "NVIDIA App") {
+		t.Errorf("warning %q should name Streamline and the NVIDIA App", plan.Warnings[0])
 	}
-	if len(plan.Sections) != 0 {
-		t.Errorf("sections = %v, want none", plan.Sections)
+	if len(plan.Additions) != 0 || len(plan.Updates) != 0 {
+		t.Errorf("additions = %v, updates = %v, want none", plan.Additions, plan.Updates)
 	}
 }
 
@@ -205,18 +200,15 @@ func TestInspectDiscoversArbitraryBundle(t *testing.T) {
 		[]bundleSpec{{"sl_whatever_7", "2FF", "D00DFACE", "66051", "sl_newfeat_7, 1.2.3, .dll, sl.newfeat.dll\n"}},
 		[]string{payload("sl_newfeat_7", "2FF", "D00DFACE", "66051")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
+	plan := inspectFixture(t, root)
+	if len(plan.Additions) != 1 {
+		t.Fatalf("additions = %v, want one", plan.Additions)
 	}
-	if len(plan.Additions()) != 1 {
-		t.Fatalf("additions = %v, want one", plan.Additions())
-	}
-	got := plan.Additions()[0]
+	got := plan.Additions[0]
 	if got.Feature != "sl_newfeat_7" || got.Hash != "D00DFACE" || got.Version != "1.2.3" {
 		t.Errorf("addition = %+v, want sl_newfeat_7 / D00DFACE / 1.2.3", got)
 	}
-	if plan.Changed() != true {
+	if !plan.Changed() {
 		t.Error("Changed() = false, want true")
 	}
 }
@@ -233,10 +225,7 @@ func TestApplyAppendsSectionsAndBacksUp(t *testing.T) {
 		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -262,10 +251,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 		[]bundleSpec{overrideSpec(overrideConfig)},
 		[]string{payload("sl_common_override_0", "1B0", "E658700", "134656")})
 
-	first, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	first := inspectFixture(t, root)
 	if err := Apply(first); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
@@ -274,12 +260,9 @@ func TestApplyIsIdempotent(t *testing.T) {
 		t.Fatalf("reading manifest: %v", err)
 	}
 
-	second, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("second Inspect: %v", err)
-	}
+	second := inspectFixture(t, root)
 	if second.Changed() {
-		t.Errorf("second plan still has work: %d copies, %d additions", len(second.Copies), len(second.Additions()))
+		t.Errorf("second plan still has work: %d copies, %d additions", len(second.Copies), len(second.Additions))
 	}
 	if err := Apply(second); err != nil {
 		t.Fatalf("second Apply: %v", err)
@@ -298,10 +281,7 @@ func TestApplyCopiesPayloadFromSibling(t *testing.T) {
 		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n"), overrideSpec(overrideConfig)},
 		[]string{payload("sl_common_override_0", "1B0", "E658700", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if len(plan.Copies) != 1 {
 		t.Fatalf("copies = %v, want one", plan.Copies)
 	}
@@ -327,10 +307,7 @@ func TestApplyCopiesPayloadUnderNewArch(t *testing.T) {
 		},
 		[]string{payload("sl_common_override_0", "1C0", "E658700", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if len(plan.Copies) != 1 {
 		t.Fatalf("copies = %v, want one", plan.Copies)
 	}
@@ -351,10 +328,7 @@ func TestApplyDoesNotOverwriteExistingBackup(t *testing.T) {
 		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 	writeFile(t, filepath.Join(root, manifestName+".bak"), "older backup")
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -373,10 +347,7 @@ func TestApplySkipsEverythingWhenNothingToDo(t *testing.T) {
 		[]bundleSpec{plainSpec("sl_common_0, 2.14.0, .dll, sl.common.dll\n")},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134656")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -412,20 +383,27 @@ func TestParseFeatureIgnoresNonFeatureLines(t *testing.T) {
 	}
 }
 
-func TestBundleDirAndArchHash(t *testing.T) {
+func TestConfigFromAndSplitArchHash(t *testing.T) {
 	path := filepath.FromSlash("/cache/sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt")
-	if got := bundleDir(path); got != filepath.FromSlash("/cache/sl_sdk_0") {
-		t.Errorf("bundleDir = %q, want /cache/sl_sdk_0", got)
+	cfg, ok := configFrom(path)
+	if !ok {
+		t.Fatalf("configFrom(%q) not ok", path)
 	}
-	if got := bundleDir("nvngx_package_config.txt"); got != "" {
-		t.Errorf("bundleDir of a bare name = %q, want empty", got)
+	if cfg.bundle != filepath.FromSlash("/cache/sl_sdk_0") || cfg.ota != 134656 || cfg.arch != "1B0" || cfg.hash != "E658703" {
+		t.Errorf("config = %+v, want /cache/sl_sdk_0 / 134656 / 1B0 / E658703", cfg)
 	}
-	if arch, hash := dirArchHash(filepath.FromSlash("/x/1B0_E658703")); arch != "1B0" || hash != "E658703" {
-		t.Errorf("dirArchHash = %q,%q want 1B0,E658703", arch, hash)
+	if _, ok := configFrom("nvngx_package_config.txt"); ok {
+		t.Error("configFrom of a bare name should not be ok")
+	}
+	// A non-numeric OTA does not parse, but the config is still recognised and
+	// sorts lowest.
+	odd, ok := configFrom(filepath.FromSlash("/cache/sl_sdk_0/versions/nightly/files/1B0_E658703/nvngx_package_config.txt"))
+	if !ok || odd.ota != -1 {
+		t.Errorf("configFrom with a non-numeric ota = %+v, %v; want ok with ota -1", odd, ok)
 	}
 	for _, bad := range []string{"nodash", "_E658703", "1B0_", ""} {
-		if arch, hash := dirArchHash(bad); arch != "" || hash != "" {
-			t.Errorf("dirArchHash(%q) = %q,%q want empty", bad, arch, hash)
+		if arch, hash := splitArchHash(bad); arch != "" || hash != "" {
+			t.Errorf("splitArchHash(%q) = %q,%q want empty", bad, arch, hash)
 		}
 	}
 }
@@ -469,19 +447,15 @@ func TestInspectDetectsStaleVersion(t *testing.T) {
 		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
+	plan := inspectFixture(t, root)
+	if len(plan.Updates) != 1 {
+		t.Fatalf("updates = %+v, want one stale section", plan.Updates)
 	}
-	updates := plan.Updates()
-	if len(updates) != 1 {
-		t.Fatalf("updates = %+v, want one stale section", updates)
+	if plan.Updates[0].Feature != "sl_common_0" || plan.Updates[0].Current != "2.14.0" || plan.Updates[0].Version != "2.14.3" {
+		t.Errorf("update = %+v, want sl_common_0 2.14.0 -> 2.14.3", plan.Updates[0])
 	}
-	if updates[0].Feature != "sl_common_0" || updates[0].Current != "2.14.0" || updates[0].Version != "2.14.3" {
-		t.Errorf("update = %+v, want sl_common_0 2.14.0 -> 2.14.3", updates[0])
-	}
-	if got := len(plan.Additions()); got != 0 {
-		t.Errorf("additions = %d, want 0: the section exists", got)
+	if len(plan.Additions) != 0 {
+		t.Errorf("additions = %d, want 0: the section exists", len(plan.Additions))
 	}
 	if !plan.Changed() {
 		t.Error("Changed() = false, want true: a stale version must be corrected")
@@ -494,10 +468,7 @@ func TestApplyCorrectsStaleVersionInPlace(t *testing.T) {
 		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -511,12 +482,9 @@ func TestApplyCorrectsStaleVersionInPlace(t *testing.T) {
 		t.Errorf("manifest = %q, want %q", manifest, want)
 	}
 	// A second run has nothing to do.
-	second, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("second Inspect: %v", err)
-	}
+	second := inspectFixture(t, root)
 	if second.Changed() {
-		t.Errorf("second run still has work: updates=%+v", second.Updates())
+		t.Errorf("second run still has work: updates=%+v", second.Updates)
 	}
 }
 
@@ -527,10 +495,7 @@ func TestApplyCorrectsStaleVersionKeepingLineStyle(t *testing.T) {
 		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
+	plan := inspectFixture(t, root)
 	if err := Apply(plan); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -550,12 +515,9 @@ func TestCurrentVersionIsNotTouched(t *testing.T) {
 		[]bundleSpec{{"sl_sdk_0", "1B0", "E658703", "134659", "sl_common_0, 2.14.3, .dll, sl.common.dll\n"}},
 		[]string{payload("sl_common_0", "1B0", "E658703", "134659")})
 
-	plan, err := Inspect(root)
-	if err != nil {
-		t.Fatalf("Inspect: %v", err)
-	}
-	if len(plan.Updates()) != 0 {
-		t.Errorf("updates = %+v, want none", plan.Updates())
+	plan := inspectFixture(t, root)
+	if len(plan.Updates) != 0 {
+		t.Errorf("updates = %+v, want none", plan.Updates)
 	}
 	if plan.Changed() {
 		t.Error("Changed() = true, want false")

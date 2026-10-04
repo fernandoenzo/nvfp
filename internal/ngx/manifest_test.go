@@ -125,3 +125,41 @@ func TestSectionHeaderTolerance(t *testing.T) {
 		}
 	}
 }
+
+// An indented key is the same key: get finds it and set rewrites it in place
+// instead of appending a second line.
+func TestManifestIndentedKeyIsTheSameKey(t *testing.T) {
+	doc, err := parseManifest([]byte("[sl_common_0]\r\n  app_E658703 = 2.14.0\r\n"))
+	if err != nil {
+		t.Fatalf("parseManifest: %v", err)
+	}
+	b := doc.section("sl_common_0")
+	if value, ok := b.get("app_E658703"); !ok || value != "2.14.0" {
+		t.Fatalf("get(app_E658703) = %q,%v want 2.14.0,true", value, ok)
+	}
+	if !b.set("app_E658703", "2.14.3") {
+		t.Fatal("set should report a change")
+	}
+	want := "[sl_common_0]\r\n  app_E658703 = 2.14.3\r\n"
+	if got := string(doc.bytes()); got != want {
+		t.Errorf("out = %q, want %q (indentation kept, no duplicate line)", got, want)
+	}
+}
+
+// On a duplicate key the first line wins, for both get and set; the later line
+// is left alone.
+func TestManifestDuplicateKeyFirstWins(t *testing.T) {
+	doc, err := parseManifest([]byte("[sl_common_0]\r\napp_E658703 = 2.14.0\r\napp_E658703 = 9.9.9\r\n"))
+	if err != nil {
+		t.Fatalf("parseManifest: %v", err)
+	}
+	b := doc.section("sl_common_0")
+	if value, _ := b.get("app_E658703"); value != "2.14.0" {
+		t.Errorf("get = %q, want the first line's 2.14.0", value)
+	}
+	b.set("app_E658703", "2.14.3")
+	want := "[sl_common_0]\r\napp_E658703 = 2.14.3\r\napp_E658703 = 9.9.9\r\n"
+	if got := string(doc.bytes()); got != want {
+		t.Errorf("out = %q, want %q", got, want)
+	}
+}

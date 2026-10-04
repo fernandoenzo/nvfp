@@ -109,9 +109,10 @@ Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loa
 `--sl-override` rebuilds them. It reads the authoritative feature list from every
 Streamline bundle's own `nvngx_package_config.txt` — nothing about the bundles is
 hard-coded, so a new bundle, hash, GPU arch or Streamline version keeps working:
-the cache is walked for `versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt`,
-the section name is the row's first field, the version its second, and the arch
-and app hash come from that directory name. It restores a payload that exists
+the cache is walked for `versions/<ota>/files/<arch>_<hash>/nvngx_package_config.txt`
+(the config under the highest numeric OTA directory wins), the section name is the
+row's first field, the version its second, and the arch and app hash come from
+that directory name. It restores a payload that exists
 under only one hash from the sibling bundle (identical bytes), appends the missing
 `[sl_<feat>_0]` / `[sl_<feat>_override_0]` sections, and **corrects a section
 that pins an outdated version** — the interposer resolves a feature to
@@ -121,11 +122,11 @@ the cache may no longer have. The first write copies the manifest to
 
 The manifest is parsed, changed in memory and written back whole, which is what
 makes line endings and a stray BOM a non-issue: UTF-8 input with any line
-ending is read, and the output is always UTF-8 with CRLF and every line
-terminated. A line the parser does not recognise — a comment, a stray token,
-odd spacing — is preserved verbatim, and editing one key never reformats the
-others, so the file comes out byte-identical except for the entries this
-command owns.
+ending is read, and the output is canonical — UTF-8, CRLF, every line
+terminated, no BOM. A line the parser does not recognise — a comment, a stray
+token, odd spacing — is preserved verbatim, and editing one key never reformats
+the others, so the file comes out byte-identical except for the entries this
+command owns and the canonical form of what it rewrites.
 
 It is **idempotent**: run it again and it reports that there is nothing to do
 and writes nothing. It is also purely local: it ignores the games manifest, the

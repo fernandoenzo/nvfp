@@ -37,16 +37,15 @@ const (
 	arch = "1B0"
 )
 
-// family is one of the two Streamline bundles in the NGX cache: sl_sdk_0
-// (CMSID 0, hash E658703) and sl_sdk_override_0 (CMSID 3, hash E658700). Both
-// ship the same features, so a payload missing under one hash can be filled
-// with the sibling's identical file.
+// family is one Streamline bundle; the two ship the same features, so a payload
+// missing under one hash can be filled with the sibling's identical file.
 type family struct {
 	bundle string // cache directory name
 	hash   string // app hash used in the manifest, e.g. app_E658703
 	other  string // hash of the sibling family
 }
 
+// sl_sdk_0 (CMSID 0, hash E658703) and sl_sdk_override_0 (CMSID 3, hash E658700).
 var families = []family{
 	{bundle: "sl_sdk_0", hash: "E658703", other: "E658700"},
 	{bundle: "sl_sdk_override_0", hash: "E658700", other: "E658703"},
@@ -177,15 +176,22 @@ func (p *Plan) add(fam family, feat feature, queued map[string]bool) {
 // It is idempotent: a plan with nothing to do writes nothing.
 func Apply(plan *Plan) error {
 	for _, copy := range plan.Copies {
-		if err := copyPayload(copy); err != nil {
-			return err
+		if err := os.MkdirAll(filepath.Dir(copy.Dest), 0o755); err != nil {
+			return fmt.Errorf("creating %s: %w", filepath.Dir(copy.Dest), err)
+		}
+		if err := copyFile(copy.Source, copy.Dest); err != nil {
+			return fmt.Errorf("copying %s: %w", copy.Dest, err)
 		}
 	}
 	if len(plan.Additions()) == 0 && len(plan.Updates()) == 0 {
 		return nil
 	}
-	if err := backupOnce(plan.Manifest, plan.Backup); err != nil {
-		return err
+	// The .bak is written the first time the manifest is modified and never
+	// overwritten, so it keeps the oldest copy, as the original script did.
+	if !exists(plan.Backup) {
+		if err := copyFile(plan.Manifest, plan.Backup); err != nil {
+			return fmt.Errorf("backing up %s: %w", plan.Manifest, err)
+		}
 	}
 	return writeManifest(plan)
 }
@@ -205,31 +211,6 @@ func writeManifest(plan *Plan) error {
 	}
 	if err := os.WriteFile(plan.Manifest, plan.doc.bytes(), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", plan.Manifest, err)
-	}
-	return nil
-}
-
-// copyPayload writes the sibling family's identical payload into the missing
-// family's file, creating its directory.
-func copyPayload(copy Copy) error {
-	dir := filepath.Dir(copy.Dest)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
-	}
-	if err := copyFile(copy.Source, copy.Dest); err != nil {
-		return fmt.Errorf("copying %s: %w", copy.Dest, err)
-	}
-	return nil
-}
-
-// backupOnce writes the .bak the first time the manifest is modified and never
-// overwrites it, so it keeps the oldest copy, as the original script did.
-func backupOnce(manifest, backup string) error {
-	if exists(backup) {
-		return nil
-	}
-	if err := copyFile(manifest, backup); err != nil {
-		return fmt.Errorf("backing up %s: %w", manifest, err)
 	}
 	return nil
 }
@@ -340,18 +321,12 @@ func payloadPath(root string, feat feature, hash string) string {
 // siblingPayload finds the same payload under the sibling family's hash: both
 // bundles ship identical bytes, so one fills the other's missing file.
 func siblingPayload(root string, feat feature, fam family) (string, bool) {
-	dir := filepath.Join(root, siblingFeature(feat.name), "versions", strconv.Itoa(feat.ota), "files")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	pattern := filepath.Join(root, siblingFeature(feat.name), "versions", strconv.Itoa(feat.ota), "files", "*_"+fam.other+".dll")
+	matches, _ := filepath.Glob(pattern)
+	if len(matches) == 0 {
 		return "", false
 	}
-	suffix := "_" + fam.other + ".dll"
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), suffix) {
-			return filepath.Join(dir, entry.Name()), true
-		}
-	}
-	return "", false
+	return matches[0], true
 }
 
 // siblingFeature swaps a feature between the two bundles, e.g.

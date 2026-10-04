@@ -76,8 +76,8 @@ func newRootCmd() *cobra.Command {
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
-	// The NGX repair returns before the manifest is read, so combining it with
-	// any of these would silently ignore the other flag.
+	// The NGX repair reads the driver bundles, never the games manifest: it is
+	// incompatible with every manifest-related flag.
 	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
 		rootCmd.MarkFlagsMutuallyExclusive("sl-override", other)
 	}

@@ -1,15 +1,11 @@
 package ngx
 
-// The manifest model below is the only place in the package that knows the
-// file's format: encoding, line endings, and which lines can be rewritten.
-// Everything else works with sections and keys.
-//
-// Two rules make a rewrite safe. The first is that a line the parser does not
-// recognise is kept verbatim, so comments, stray tokens and odd spacing survive
-// untouched. The second is that a recognised line keeps the exact text that
-// preceded its value, so editing one key never reformats the others. The output
-// is otherwise canonical: UTF-8, CRLF, one line per entry, every line
-// terminated, no BOM — whatever encoding the input used.
+// This file is the only place in the package that knows the manifest's format:
+// encoding, line endings, which lines can be rewritten. A rewrite is safe
+// because a line the parser does not recognise is kept verbatim, and a
+// recognised line keeps the exact text that preceded its value — editing one
+// key never reformats the others. The output is canonical: UTF-8, CRLF, every
+// line terminated, no BOM.
 
 import (
 	"bytes"

@@ -373,52 +373,26 @@ The step is idempotent: running the tool again reports `⊘ already in driver pr
 
 ### `app_user_model_id` vs `driver_app`: why both exist
 
-This trips people up, so it is worth stating plainly: **a driver profile matches by the name of the process that starts, and nothing else.** `NVDRS_APPLICATION.appName` is documented as "String name of the Application" — the driver compares it against the process image name at launch. There is no notion of package identity in the match.
-
-That matters because the same packaged game can start in one of two ways, and each exposes a different process name:
+**A driver profile matches by the name of the process that starts, and nothing else** — `NVDRS_APPLICATION.appName` is compared against the process image name; there is no package identity in the match. A packaged game can start in one of two ways, each exposing a different process name:
 
 | How the game runs | Name the driver sees | What to register |
 |---|---|---|
 | Hosted Store app (`ApplicationFrameHost`/`WWAHost` keeps the package identity) | the **package family name** | the default: omit `driver_app` |
 | Plain executable, even if bought in the Store | the **`.exe`** name | set `driver_app` to that `.exe` |
 
-So the default (package family name, derived from `app_user_model_id`) is right for genuinely hosted apps, and wrong for games that ship as classic executables. Two entries of the same saga can land on opposite sides:
+Two entries of the same saga can land on opposite sides: Remake applies its profile with the package family name (`"versions": ["uwp"]`, no `driver_app`), while Rebirth only applies it with `"driver_app": "ff7rebirth.exe"` and silently does nothing with the UWP ID. Both are correct — the games just launch differently. `app_user_model_id` is still needed on both: it is what patches `fingerprint.db`.
 
-```json
-{ "fingerprint": "final_fantasy_vii_remake",
-  "app_user_model_id": "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
-  "versions": ["uwp"] }
-
-{ "fingerprint": "final_fantasy_vii_rebirth",
-  "app_user_model_id": "39EA002F.EXED2_n746a19ndrrjg!AppFINALFANTASYVIIREBIRTHShipping",
-  "driver_app": "ff7rebirth.exe",
-  "versions": ["*"] }
-```
-
-Remake applies its profile with the package family name; Rebirth only applies it with `ff7rebirth.exe`, and silently does nothing with the UWP ID. Both are correct — the games just launch differently. `app_user_model_id` is still needed on both: it is what patches `fingerprint.db` for NVIDIA App.
-
-There is no way to tell from the manifest which case a game is, so it has to be checked at runtime (see below). The `isMetro` flag in `NVDRS_APPLICATION_V4`, which sounds like it should declare "this is a Store app", is **ignored by the driver**: it reads back as 0 whatever you pass. That is why `nvfp` leaves it at 0 and why the string is the only lever available.
+The `isMetro` flag, which sounds like it should declare "this is a Store app", is **ignored by the driver**: it reads back as 0 whatever you pass, so `nvfp` leaves it at 0 and the string is the only lever available.
 
 ### Checking which name a game actually needs
 
-The reliable way is to look at the running process while the game is at its main menu, from an **unprivileged** PowerShell:
+Look at the running process while the game is at its main menu, from an unprivileged PowerShell:
 
 ```powershell
-# Every process whose name or package identity mentions the game.
-Get-Process | Where-Object { $_.Path -like '*ff7rebirth*' -or $_.Name -like '*ff7*' } |
-    Select-Object Id, Name, Path, @{n='Package';e={(Get-AppxPackage -ErrorAction SilentlyContinue |
-        Where-Object { $_.InstallLocation -and $_.InstallLocation -like "*$($_.Name)*" }).PackageFamilyName}}
-
-# Simpler and usually enough: what the driver will compare against is just Name.
 Get-Process | Where-Object Name -like 'ff7*' | Format-Table Id, Name, Path -Auto
 ```
 
-Read the `Name` column:
-
-- It is the game's `.exe` (`ff7rebirth.exe`) → register that with `driver_app`.
-- It is an app host (`ApplicationFrameHost`, `WWAHost`, `GameBar`) → the game is hosted and the **package family name** is the right string; leave `driver_app` unset.
-
-You can confirm what the driver sees by listing the profile's registered strings with NvidiaProfileInspectorRevamped: the entry that makes the profile apply is exactly the one matching that process name. If the profile contains the package family name but the game launches as an `.exe`, the profile will be there and still not apply — which is the whole symptom.
+Read the `Name` column: the game's `.exe` (e.g. `ff7rebirth.exe`) → set `driver_app` to it; an app host (`ApplicationFrameHost`, `WWAHost`, `GameBar`) → the game is hosted and the package family name is right, leave `driver_app` unset. NvidiaProfileInspectorRevamped shows which registered string actually makes the profile apply: the one matching that process name.
 
 ### Diagnosing profile resolution without writing anything
 
@@ -445,8 +419,6 @@ When nothing matches, every attempt is listed with the driver's own status, so t
   => unresolved: set "driver_profile" in games.json with the exact name from NVIDIA Control Panel
 ```
 
-Use it first whenever the driver step appears to do nothing: it needs no privileges and produces output in the current console, so nothing can be missed.
-
 ### When the profile cannot be resolved
 
 ```
@@ -471,21 +443,11 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 The program checks its own token before touching anything. Unelevated, and with driver work pending (`--sl-override` requests it too, but only when it actually has something to write), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
-The token query used to pass a null `ReturnLength` to `GetTokenInformation`. That call is documented as requiring a valid pointer there, and it fails with `ERROR_INVALID_PARAMETER` — so **every** process, the elevated child included, reported itself as unelevated and the driver step was skipped with *"administrator privileges required"* even right after accepting the UAC prompt. It now passes a real length and checks the result, mirroring `x/sys/windows.Token.IsElevated`. A failure to read the token is reported as an error instead of being silently read as "not an administrator": the token is opened explicitly with `OpenProcessToken(CurrentProcess(), TOKEN_QUERY, ...)` — the access this query needs — rather than through the deprecated `OpenCurrentProcessToken` helper, which keeps the error channel the pseudo-token `GetCurrentProcessToken` would have dropped.
+The token is opened explicitly with `OpenProcessToken(CurrentProcess(), TOKEN_QUERY, ...)` and the elevation comes from `x/sys/windows.Token.IsElevated`: a failure to read it is reported as an error instead of being silently read as "not an administrator".
 
-The elevated child runs in its own console window, which Windows closes the moment the process exits. Because the work takes milliseconds, that window used to flash by unread. The child now holds it open with a `Press Enter to close this window...` prompt when its output is a real console; when the output is piped or redirected there is no window to lose, so no pause is added and scripts keep working.
+The elevated child runs in its own console window, which Windows closes the moment the process exits. Because the work takes milliseconds, the child holds it open with a `Press Enter to close this window...` prompt when its output is a real console; when the output is piped or redirected there is no window to lose, so no pause is added and scripts keep working.
 
 If you decline the prompt, or the relaunch fails, the driver step is skipped with an explicit warning and `fingerprint.db` is still patched (exit code 0).
-
-### Why the driver step appeared to do nothing
-
-Two independent faults, both fixed:
-
-1. **Resolution worked; the write never ran.** The token query passed a null `ReturnLength` to `GetTokenInformation`, which fails with `ERROR_INVALID_PARAMETER`, so `isElevated()` reported *every* process as unelevated — the elevated child included. The driver step was skipped with *"administrator privileges required"* right after the UAC prompt, which is why the game was reported as `⊘ already has uwp version(s)` and then nothing else happened. See [Elevation](#elevation).
-
-2. **Profiles written with Windows separators could not be found.** `fingerprint.db` writes `<DriverProfile>End\Binaries\Win64\ff7rebirth_.exe</DriverProfile>` while the driver stores the entry forward-slashed and lowercased. Both the verbatim and the lowercase form are tried, which covers it: run `--doctor` and you will see the verbatim spelling resolve on the first attempt, including these path-style values.
-
-`--doctor` needs no privileges, so it reports the truth even when the write path is broken — use it whenever the driver step appears to do nothing.
 
 ## Manifest resolution
 

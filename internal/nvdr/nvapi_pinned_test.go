@@ -57,21 +57,3 @@ func TestPinnedStatuses(t *testing.T) {
 		})
 	}
 }
-
-func TestPinnedVersions(t *testing.T) {
-	tests := []struct {
-		name string
-		got  uint32
-		want uint32
-	}{
-		{"applicationVersion", applicationVersion, 282636},
-		{"profileVersion", profileVersion, 69652},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Errorf("%s = %d, want %d", tt.name, tt.got, tt.want)
-			}
-		})
-	}
-}

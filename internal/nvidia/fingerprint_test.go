@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	gamesdb "github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/set"
 )
 
 func TestParseFingerprintDB(t *testing.T) {
@@ -81,22 +82,22 @@ func TestAddUWPVersion(t *testing.T) {
 	}
 
 	// Check that removed fields are gone
-	elementNames := make(map[string]bool)
+	elementNames := set.New[string](len(got.Elements))
 	for _, e := range got.Elements {
-		elementNames[strings.ToLower(e.ElementName())] = true
+		elementNames.Add(strings.ToLower(e.ElementName()))
 	}
 
 	for _, removed := range []string{"Files", "Launch", "SteamAppIds", "Directories", "InstallDirRegValues"} {
-		if elementNames[strings.ToLower(removed)] {
+		if elementNames.Contains(strings.ToLower(removed)) {
 			t.Errorf("got should not contain %s", removed)
 		}
 	}
 
 	// Check that UWP-specific fields are present
-	if !elementNames["uwppackagefamilyname"] {
+	if !elementNames.Contains("uwppackagefamilyname") {
 		t.Error("got should contain UWPPackageFamilyName")
 	}
-	if !elementNames["appusermodelid"] {
+	if !elementNames.Contains("appusermodelid") {
 		t.Error("got should contain AppUserModelId")
 	}
 
@@ -110,10 +111,10 @@ func TestAddUWPVersion(t *testing.T) {
 	}
 
 	// Check preserved fields
-	if !elementNames["cmsid"] {
+	if !elementNames.Contains("cmsid") {
 		t.Error("got should contain CMSID")
 	}
-	if !elementNames["driverprofile"] {
+	if !elementNames.Contains("driverprofile") {
 		t.Error("got should contain DriverProfile")
 	}
 

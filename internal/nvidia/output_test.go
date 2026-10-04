@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	gamesdb "github.com/fernandoenzo/nvfp/internal/db"
+	"github.com/fernandoenzo/set"
 )
 
 func TestPatchOutputContent(t *testing.T) {
@@ -83,18 +84,18 @@ func TestPatchOutputContent(t *testing.T) {
 	}
 
 	// Check that UWP-specific fields are present
-	elementNames := make(map[string]bool)
+	elementNames := set.New[string](len(uwpVersion.Elements))
 	for _, elem := range uwpVersion.Elements {
-		elementNames[strings.ToLower(elem.ElementName())] = true
+		elementNames.Add(strings.ToLower(elem.ElementName()))
 	}
 
-	if !elementNames["uwppackagefamilyname"] {
+	if !elementNames.Contains("uwppackagefamilyname") {
 		t.Error("UWP version should contain UWPPackageFamilyName")
 	}
-	if !elementNames["appusermodelid"] {
+	if !elementNames.Contains("appusermodelid") {
 		t.Error("UWP version should contain AppUserModelId")
 	}
-	if !elementNames["distributor"] {
+	if !elementNames.Contains("distributor") {
 		t.Error("UWP version should contain Distributor")
 	}
 
@@ -144,14 +145,14 @@ func TestPatchOutputContent(t *testing.T) {
 	}
 
 	// Verify round-trip preserved UWP fields
-	uwp2Names := make(map[string]bool)
+	uwp2Names := set.New[string](len(uwp2.Elements))
 	for _, elem := range uwp2.Elements {
-		uwp2Names[strings.ToLower(elem.ElementName())] = true
+		uwp2Names.Add(strings.ToLower(elem.ElementName()))
 	}
-	if !uwp2Names["uwppackagefamilyname"] {
+	if !uwp2Names.Contains("uwppackagefamilyname") {
 		t.Error("round-trip: UWP version should contain UWPPackageFamilyName")
 	}
-	if !uwp2Names["appusermodelid"] {
+	if !uwp2Names.Contains("appusermodelid") {
 		t.Error("round-trip: UWP version should contain AppUserModelId")
 	}
 }

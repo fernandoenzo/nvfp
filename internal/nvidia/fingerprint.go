@@ -242,15 +242,15 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 
 // buildRemoveSet creates a set of element names to remove when building a version.
 // Default removals only apply when adding a new version.
-func buildRemoveSet(extra []string, includeDefaults bool) map[string]bool {
-	removeSet := make(map[string]bool)
+func buildRemoveSet(extra []string, includeDefaults bool) *set.Set[string] {
+	removeSet := set.New[string](len(extra) + len(defaultRemoveFields))
 	if includeDefaults {
 		for _, f := range defaultRemoveFields {
-			removeSet[strings.ToLower(f)] = true
+			removeSet.Add(strings.ToLower(f))
 		}
 	}
 	for _, f := range extra {
-		removeSet[strings.ToLower(f)] = true
+		removeSet.Add(strings.ToLower(f))
 	}
 	return removeSet
 }
@@ -284,11 +284,11 @@ func buildOverrideSet(overrides map[string]string, forcedFields map[string]strin
 }
 
 // copyPreservedElements copies source elements that survive filtering.
-func copyPreservedElements(dst *Version, src *Version, removeSet map[string]bool, overrideSet map[string]XmlElement) {
+func copyPreservedElements(dst *Version, src *Version, removeSet *set.Set[string], overrideSet map[string]XmlElement) {
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
 		_, overrides := overrideSet[nameLower]
-		if removeSet[nameLower] || overrides {
+		if removeSet.Contains(nameLower) || overrides {
 			continue
 		}
 		dst.Elements = append(dst.Elements, elem)

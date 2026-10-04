@@ -17,15 +17,17 @@ import (
 var errElevationCancelled = errors.New("elevation cancelled")
 
 // isElevated reports whether the current process runs with an elevated token.
-// Writing the driver profile database requires administrator privileges. It
-// delegates to x/sys, whose Token.IsElevated is the well-tested implementation:
-// a hand-rolled version that passed a null ReturnLength to GetTokenInformation
-// failed with ERROR_INVALID_PARAMETER and silently reported every process as
-// unelevated, so the driver step was always skipped. The token query is not
-// silent either way: a failure is reported instead of read as "not an admin".
+// Writing the driver profile database requires administrator privileges. The
+// token is opened explicitly with TOKEN_QUERY — the access this needs — instead
+// of the deprecated OpenCurrentProcessToken helper, and it delegates to x/sys's
+// Token.IsElevated, the well-tested implementation: a hand-rolled version that
+// passed a null ReturnLength to GetTokenInformation failed with
+// ERROR_INVALID_PARAMETER and silently reported every process as unelevated, so
+// the driver step was always skipped. The token query is not silent either way:
+// a failure to open the token is reported instead of read as "not an admin".
 func isElevated() (bool, error) {
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
 		return false, fmt.Errorf("opening the process token: %w", err)
 	}
 	defer token.Close()

@@ -15,8 +15,7 @@
 // Streamline (sl_) features; the arch and the app hash come from that directory
 // name, and a feature's payload lives at
 // <root>/<feature>/versions/<ota>/files/<arch>_<hash><ext>. A bundle with no
-// sl_ rows (e.g. the DLSS payload bundle) is not a Streamline bundle and is
-// left alone.
+// sl_ rows is not a Streamline bundle and is left alone.
 //
 // The manifest is parsed, mutated in memory and written back whole, so the
 // format itself (line endings, section spacing) lives in one place:
@@ -229,8 +228,7 @@ func copyFile(src, dst string) error {
 // one per feature name, in bundle-then-config order, plus a warning per bundle
 // that could not be read.
 func discover(root string) ([]feature, []string) {
-	// One bundle keeps one package config per update; the highest path is the
-	// newest, which is the one that ships now.
+	// newest maps each bundle dir to the package config under its highest OTA.
 	newest := map[string]string{}
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || entry.Name() != packageConfigName {
@@ -240,7 +238,8 @@ func discover(root string) ([]feature, []string) {
 		if bundle == "" {
 			return nil
 		}
-		if current, ok := newest[bundle]; !ok || path > current {
+		// The newest config is the one under the highest numeric OTA directory.
+		if current, ok := newest[bundle]; !ok || ota(path) > ota(current) {
 			newest[bundle] = path
 		}
 		return nil
@@ -314,9 +313,9 @@ func parseFeature(line string) (feature, bool) {
 	}, true
 }
 
-// parseConfig reads a bundle's feature rows, keeping the Streamline (sl_) ones
-// and stamping each with the bundle's arch and hash. A bundle with no sl_ rows
-// (e.g. the DLSS payload bundle) yields an empty slice.
+// parseConfig reads a bundle's Streamline (sl_) feature rows, stamping each
+// with the bundle's arch and hash. A bundle with no sl_ rows yields an empty
+// slice.
 func parseConfig(path, arch, hash string) ([]feature, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -364,10 +363,22 @@ func siblingFeature(name string) string {
 	return base + "_override_0"
 }
 
-// bundleDir returns the cache directory a package config belongs to. The path
-// is <bundle>/versions/<ota>/files/<arch>_<hash>/<name>, so the bundle is
-// everything before the "versions" component four levels up; anything else is
-// not a config in the layout this package understands.
+// ota returns the numeric OTA version directory of a package config path, or
+// -1 when the path does not match the layout bundleDir recognises.
+func ota(path string) int {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	if len(parts) < 5 {
+		return -1
+	}
+	n, err := strconv.Atoi(parts[len(parts)-4])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// bundleDir returns the cache directory holding a package config, or "" when
+// the path is not <bundle>/versions/<ota>/files/<arch>_<hash>/<name>.
 func bundleDir(path string) string {
 	parts := strings.Split(filepath.ToSlash(path), "/")
 	if len(parts) < 5 || parts[len(parts)-5] != versionsDir {

@@ -443,20 +443,21 @@ func TestSiblingFeatureSwapsFamilies(t *testing.T) {
 	}
 }
 
-// A bundle keeps one config per update; the highest path sorts last and wins.
+// A bundle keeps one config per update; the highest numeric OTA wins, even
+// when a narrower directory name would sort higher as a string ("9" > "10").
 func TestDiscoverPicksNewestConfig(t *testing.T) {
 	root := cacheFixture(t, "",
 		[]bundleSpec{
-			{"sl_sdk_0", "1B0", "E658703", "1", "sl_common_0, 2.13.0, .dll, sl.common.dll\n"},
-			{"sl_sdk_0", "1B0", "E658703", "2", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+			{"sl_sdk_0", "1B0", "E658703", "9", "sl_common_0, 2.14.0, .dll, sl.common.dll\n"},
+			{"sl_sdk_0", "1B0", "E658703", "10", "sl_common_0, 2.9.0, .dll, sl.common.dll\n"},
 		}, nil)
 
 	features, warnings := discover(root)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", warnings)
 	}
-	if len(features) != 1 || features[0].version != "2.14.0" {
-		t.Errorf("features = %+v, want the versions/2 config", features)
+	if len(features) != 1 || features[0].version != "2.9.0" {
+		t.Errorf("features = %+v, want the versions/10 config", features)
 	}
 }
 

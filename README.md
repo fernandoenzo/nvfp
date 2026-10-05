@@ -265,8 +265,8 @@ Some games already work without touching the driver, so there is no reason to ad
 
 ```json
 {
-  "fingerprint": "final_fantasy_xvi",
-  "app_user_model_id": "39EA002F.Hermia_n746a19ndrrjg!Game",
+  "fingerprint": "your_uwp_game",
+  "app_user_model_id": "Pkg_abc123!AppGame",
   "skip_driver": true,
   "versions": ["uwp"]
 }

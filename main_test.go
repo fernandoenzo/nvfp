@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -846,29 +847,49 @@ func writeFixtureFile(t *testing.T, root, rel, content string) {
 	}
 }
 
-// withNGXRoot points the --sl-override flow at a fixture directory, turns the
-// flag on and restores every global afterwards.
-func withNGXRoot(t *testing.T, root string, dry bool) {
+// slFlow turns the --sl-override flow on against root and restores the global
+// afterwards, returning the fixture root resolver the flow must run with.
+func slFlow(t *testing.T, root string, dry bool) func() (string, error) {
 	t.Helper()
-	oldRoot, oldFlag, oldDry, oldJSON := ngxRoot, slOverrideFlag, dryRun, gamesJSONPath
-	t.Cleanup(func() { ngxRoot, slOverrideFlag, dryRun, gamesJSONPath = oldRoot, oldFlag, oldDry, oldJSON })
-	ngxRoot = func() (string, error) { return root, nil }
-	slOverrideFlag, dryRun = true, dry
+	oldDry := dryRun
+	t.Cleanup(func() { dryRun = oldDry })
+	dryRun = dry
+	return func() (string, error) { return root, nil }
 }
 
-// TestSLOverride drives the whole --sl-override flow: skipping the games
-// manifest, --dry-run, idempotence, and the stale/missing repair end to end.
-// Each subtest builds its own cache fixture and its own global seam.
+// TestSLOverride drives the whole --sl-override flow: dispatch order,
+// --dry-run, idempotence, and the stale/missing repair end to end.
+// Each subtest builds its own cache fixture and runs the flow with a fixture
+// root resolver, so the real ngx.Root is never consulted.
 func TestSLOverride(t *testing.T) {
-	t.Run("skips manifest resolution", func(t *testing.T) {
-		// --sl-override is a pure local file operation: with an invalid
-		// --games-json it still repairs, proving run() never resolves the manifest.
-		root := slFixture(t)
-		withNGXRoot(t, root, false)
-		gamesJSONPath = filepath.Join(root, "does-not-exist.json")
+	// Dispatch: --sl-override must reach the NGX repair before run() resolves
+	// the games manifest. Off Windows the real Root is unreachable by design,
+	// which makes the dispatch observable through the error; on Windows the
+	// repair would touch the real OTA cache, so the assertion cannot run.
+	t.Run("dispatches before resolving the manifest", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("ngx.Root reads the real OTA cache on Windows")
+		}
+		oldFlag, oldPath := slOverrideFlag, gamesJSONPath
+		t.Cleanup(func() { slOverrideFlag, gamesJSONPath = oldFlag, oldPath })
+		slOverrideFlag = true
+		gamesJSONPath = filepath.Join(t.TempDir(), "does-not-exist.json")
 
-		if err := run(nil, nil); err != nil {
-			t.Fatalf("run() with --sl-override error: %v", err)
+		err := run(nil, nil)
+		if err == nil {
+			t.Fatal("run() with --sl-override returned nil without a reachable NGX root")
+		}
+		if strings.Contains(err.Error(), "loading games database") {
+			t.Errorf("run() resolved the games manifest before the NGX repair: %v", err)
+		}
+	})
+
+	t.Run("repairs the cache and backs up the manifest", func(t *testing.T) {
+		root := slFixture(t)
+		resolve := slFlow(t, root, false)
+
+		if err := runSLOverride(resolve); err != nil {
+			t.Fatalf("runSLOverride() error: %v", err)
 		}
 
 		manifest, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
@@ -890,15 +911,15 @@ func TestSLOverride(t *testing.T) {
 
 	t.Run("dry run writes nothing", func(t *testing.T) {
 		root := slFixture(t)
-		withNGXRoot(t, root, true)
+		resolve := slFlow(t, root, true)
 
 		before, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
 		if err != nil {
 			t.Fatalf("reading manifest: %v", err)
 		}
 		output := captureStdout(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("run() with --sl-override --dry-run error: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("runSLOverride() with --dry-run error: %v", err)
 			}
 		})
 		after, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
@@ -918,18 +939,18 @@ func TestSLOverride(t *testing.T) {
 
 	t.Run("idempotent", func(t *testing.T) {
 		root := slFixture(t)
-		withNGXRoot(t, root, false)
+		resolve := slFlow(t, root, false)
 
-		if err := run(nil, nil); err != nil {
-			t.Fatalf("first run() error: %v", err)
+		if err := runSLOverride(resolve); err != nil {
+			t.Fatalf("first runSLOverride() error: %v", err)
 		}
 		first, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
 		if err != nil {
 			t.Fatalf("reading manifest: %v", err)
 		}
 		output := captureStdout(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("second run() error: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("second runSLOverride() error: %v", err)
 			}
 		})
 		second, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
@@ -953,11 +974,11 @@ func TestSLOverride(t *testing.T) {
 		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
 			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
 		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/1B0_E658700.dll", "payload bytes")
-		withNGXRoot(t, root, false)
+		resolve := slFlow(t, root, false)
 
 		output := captureStdout(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("run: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("runSLOverride: %v", err)
 			}
 		})
 		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
@@ -980,11 +1001,11 @@ func TestSLOverride(t *testing.T) {
 		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
 			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
 		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/160_E658700.dll", "other-arch")
-		withNGXRoot(t, root, false)
+		resolve := slFlow(t, root, false)
 
 		stdout, stderr := captureOutput(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("run: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("runSLOverride: %v", err)
 			}
 		})
 		if !strings.Contains(stdout, "no repairable changes") || strings.Contains(stdout, "present and current") {
@@ -998,11 +1019,11 @@ func TestSLOverride(t *testing.T) {
 	t.Run("no Streamline bundle does not claim every section is current", func(t *testing.T) {
 		root := t.TempDir()
 		writeFixtureFile(t, root, "nvngx_config.txt", "[sl_sdk_0]\r\napp_E658703 = 2.14.0")
-		withNGXRoot(t, root, false)
+		resolve := slFlow(t, root, false)
 
 		stdout, stderr := captureOutput(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("run: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("runSLOverride: %v", err)
 			}
 		})
 		if !strings.Contains(stderr, "no Streamline") {
@@ -1029,11 +1050,11 @@ func TestSLOverride(t *testing.T) {
 			"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
 		writeFixtureFile(t, root, "sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
 		writeFixtureFile(t, root, "sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")
-		withNGXRoot(t, root, false)
+		resolve := slFlow(t, root, false)
 
 		output := captureStdout(t, func() {
-			if err := run(nil, nil); err != nil {
-				t.Fatalf("run: %v", err)
+			if err := runSLOverride(resolve); err != nil {
+				t.Fatalf("runSLOverride: %v", err)
 			}
 		})
 		got, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))

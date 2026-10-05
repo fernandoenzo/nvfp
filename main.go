@@ -108,7 +108,7 @@ func run(cmd *cobra.Command, args []string) error {
 	case restoreFlag:
 		return restoreDB()
 	case slOverrideFlag:
-		return runSLOverride()
+		return runSLOverride(ngx.Root)
 	}
 	gameDB, err := resolveGames()
 	if err != nil {
@@ -126,12 +126,13 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 // runSLOverride repairs the NGX cache, holding the elevated child's console
-// open when there is a real window to read.
-func runSLOverride() error {
+// open when there is a real window to read. resolveRoot is ngx.Root in
+// production; tests inject a fixture directory instead.
+func runSLOverride(resolveRoot func() (string, error)) error {
 	if elevatedFlag && !stdoutIsPiped() {
 		defer pauseBeforeExit()
 	}
-	return applySLOverride()
+	return applySLOverride(resolveRoot)
 }
 
 // patchEverything patches fingerprint.db and, unless the step is disabled,
@@ -214,16 +215,11 @@ func ensureElevated(wanted bool) {
 	}
 }
 
-// ngxRoot resolves the NGX OTA cache directory. It is a variable so tests can
-// point the whole --sl-override flow at a fixture directory; production always
-// calls ngx.Root.
-var ngxRoot = ngx.Root
-
 // applySLOverride repairs the NGX cache: it copies compatible sibling payloads,
 // adds missing per-feature sections and corrects stale versions. It backs up
 // the manifest before changing it and requests UAC only when work is pending.
-func applySLOverride() error {
-	root, err := ngxRoot()
+func applySLOverride(resolveRoot func() (string, error)) error {
+	root, err := resolveRoot()
 	if err != nil {
 		return err
 	}

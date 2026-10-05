@@ -45,7 +45,7 @@ Architecture layers:
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
 4. **Driver layer** (`internal/nvdr`): NVAPI DRS binding (Windows) + status/message types (all platforms)
-5. **NGX layer** (`internal/ngx`): Streamline OTA manifest repair (all platforms; the cache path comes from the Windows-only `Root`, which tests bypass through the `ngxRoot` seam in `main.go`)
+5. **NGX layer** (`internal/ngx`): Streamline OTA manifest repair (all platforms; the cache path comes from the Windows-only `Root`, which `runSLOverride` receives as an argument so tests can drive the repair against a fixture)
 6. **Network layer** (`internal/update`): Remote games.json fetch
 7. **Shared utilities** (`internal/fsutil`): staged file copy/replacement and durable directory creation where supported
 

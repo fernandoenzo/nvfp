@@ -100,12 +100,15 @@ func (m *manifest) bytes() []byte {
 			b.WriteString("\r\n")
 			continue
 		}
-		b.WriteString("[" + it.block.name + "]\r\n")
+		b.WriteString("[")
+		b.WriteString(it.block.name)
+		b.WriteString("]\r\n")
 		for _, line := range it.block.lines {
 			if line.key == "" {
 				b.WriteString(line.raw)
 			} else {
-				b.WriteString(line.prefix + line.value)
+				b.WriteString(line.prefix)
+				b.WriteString(line.value)
 			}
 			b.WriteString("\r\n")
 		}

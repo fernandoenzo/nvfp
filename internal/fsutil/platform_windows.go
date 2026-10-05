@@ -57,8 +57,8 @@ func extendedPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.HasPrefix(absolute, `\\`) {
-		return `\\?\UNC\` + strings.TrimPrefix(absolute, `\\`), nil
+	if rest, ok := strings.CutPrefix(absolute, `\\`); ok {
+		return `\\?\UNC\` + rest, nil
 	}
 	return `\\?\` + absolute, nil
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // CopyFile atomically copies src over dst, preserving the destination's mode
@@ -66,8 +67,8 @@ func MkdirAllSync(path string, perm os.FileMode) error {
 	if err := os.MkdirAll(path, perm); err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)
 	}
-	for i := len(missing) - 1; i >= 0; i-- {
-		parent := filepath.Dir(missing[i])
+	for _, dir := range slices.Backward(missing) {
+		parent := filepath.Dir(dir)
 		if err := syncDir(parent); err != nil && !errors.Is(err, errDirSyncUnsupported) {
 			return fmt.Errorf("syncing directory %s: %w", parent, err)
 		}

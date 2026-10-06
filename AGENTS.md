@@ -38,6 +38,8 @@ findFingerprintDB ──► dbPath     │
 findDAOFingerprintDB ──┐  (--restore)
                        ▼
       getFingerprintDBPath ──► restoreDB ──► CopyFile → working fingerprint.db
+
+nvidiaModelsDir ──► resetModels ──► RemoveAll → NGX models folder  (--reset-models)
 ```
 
 Architecture layers:

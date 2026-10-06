@@ -49,7 +49,7 @@ What each symbol means:
 - **⊘** — already correct, nothing to do
 - **✗** — failed (fingerprint not found, no source version to build UWP from, driver profile missing or conflicting)
 
-The patch only takes effect after you **log out of Windows and sign back in** — no reboot needed. Without that, relaunching NVIDIA App and refreshing the games list still shows nothing: the ontology is rebuilt at session start. The program prints the same reminder whenever it actually modifies `fingerprint.db`.
+The patch only takes effect after you **log out of Windows and sign back in** — no reboot needed. Until then NVIDIA App keeps showing its cached game list. The program prints that reminder whenever it modifies `fingerprint.db`.
 
 ### Preview changes without writing anything
 
@@ -89,32 +89,25 @@ Note: log out of Windows and sign back in (no reboot needed); NVIDIA rebuilds th
 Note: after signing back in, open any DLSS game once (until its main menu) and close it before playing: NVIDIA creates the dlss payloads in models only on that first run.
 ```
 
-The NVIDIA NGX OTA cache (the `models` folder) can end up incomplete: the NVIDIA
-App's bootstrap rewrites `nvngx_config.txt` and drops the per-feature sections,
-and the games silently fall back to their bundled plugins. Deleting the whole
-folder is enough to fix it — at the next session NVIDIA rebuilds it completely
-and with the optimal configuration, so there is no need to repair the manifest
-by hand.
+NVIDIA App stores Streamline's NGX OTA payloads in the `models` folder, and
+that folder can end up stale or incomplete. Deleting it is enough: at the next
+session NVIDIA rebuilds it completely and with the optimal configuration.
 
 `--reset-models` resolves the folder from `OTACachePath` in
 `HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to
 `C:\ProgramData\NVIDIA\NGX\models`, and refuses to delete anything whose last
 path component is not `models`. It requests administrator privileges through
-the UAC prompt (declining it means nothing is deleted and the error is
-reported), reports `Nothing to do` when the folder does not exist, and
-supports `--dry-run` (`Would delete <path>`, nothing touched).
-
-The command is local and cannot be combined with `--list`, `--game`,
-`--games-json`, `--doctor`, `--no-driver` or `--restore`. Run it after the
-NVIDIA App has started and before launching the game; repeat it after a driver
-or app update.
+the UAC prompt, reports `Nothing to do` when the folder does not exist, and
+supports `--dry-run` (`Would delete <path>`, nothing touched). It cannot be
+combined with `--list`, `--game`, `--games-json`, `--doctor`, `--no-driver` or
+`--restore`.
 
 **After the session restart, warm the cache up once:** open any DLSS game,
 wait until it reaches the main menu and close it; after that, play whatever you
 want. NVIDIA App rebuilds `models` and every `sl_` bundle at session start, but
 the `dlss`-family folders inside `models` are created only when a DLSS game
-runs for the first time after the reset — until then, DLSS titles still find no
-payloads.
+runs for the first time after the reset, so DLSS titles find no payloads until
+then.
 
 ### Skip the driver step
 
@@ -304,9 +297,9 @@ For each game with `versions: ["uwp"]`:
 4. Writes the patched database
 5. Registers the UWP string (package family name by default) in the game's driver profile through NVAPI, unless `--no-driver`
 
-With `--reset-models` instead, nothing above runs: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder).
+`--reset-models` is a separate mode: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder).
 
-The patched games become visible only after a Windows logoff/logon (no reboot needed): the ontology is rebuilt at session start, and until then NVIDIA App keeps showing its cached list no matter how many times you refresh it. The program prints that reminder whenever it modifies the database.
+The patched games become visible only after a Windows logoff/logon (no reboot needed): the ontology is rebuilt at session start. The program prints that reminder whenever it modifies the database.
 
 No backup is created beside `fingerprint.db`: NVIDIA App keeps its pristine copy
 under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
@@ -398,7 +391,7 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 ### Elevation
 
-The program checks its own token before touching anything. Unelevated, and with driver work pending (`--reset-models` requests it too, but only when the folder exists), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
+The program checks its own token before touching anything. Unelevated, and with driver work pending (`--reset-models` requests it too, when the folder exists), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
 The token is opened explicitly with `OpenProcessToken(CurrentProcess(), TOKEN_QUERY, ...)` and the elevation comes from `x/sys/windows.Token.IsElevated`: a failure to read it is reported as an error instead of being silently read as "not an administrator".
 

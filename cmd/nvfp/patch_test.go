@@ -313,7 +313,7 @@ func reloginFixture(t *testing.T) string {
 	t.Setenv("LOCALAPPDATA", localAppData)
 	ontology := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App",
 		"NvBackend", "ApplicationOntology", "data", "fingerprint.db")
-	data, err := os.ReadFile(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "nvidia", "testdata", "fingerprint.db"))
 	if err != nil {
 		t.Fatalf("reading testdata fingerprint.db: %v", err)
 	}

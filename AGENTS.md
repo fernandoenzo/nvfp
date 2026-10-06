@@ -43,16 +43,17 @@ nvidiaModelsDir ──► resetModels ──► RemoveAll → NGX models folder 
 ```
 
 Architecture layers:
-1. **CLI layer** (the root `main` package: `main.go`, `version.go`, `manifest.go`, `patch.go`, `driver.go`, `doctor.go`, `list.go`, `paths.go`, `restore.go`, `models*.go`, `elevation*.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--no-driver`, `--doctor`, `--reset-models`, `--elevated`, `--version`), orchestration, UAC relaunch, models-reset flow
+1. **CLI layer** (`cmd/nvfp/`, one file per responsibility: `main.go`, `version.go`, `manifest.go`, `patch.go`, `driver.go`, `doctor.go`, `list.go`, `paths.go`, `restore.go`, `models*.go`, `elevation*.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--no-driver`, `--doctor`, `--reset-models`, `--elevated`, `--version`), orchestration, UAC relaunch, models-reset flow
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
 4. **Driver layer** (`internal/nvdr`): NVAPI DRS binding (Windows) + status/message types (all platforms)
 5. **Network layer** (`internal/update`): Remote games.json fetch
 6. **Shared utilities** (`internal/fsutil`): staged file copy/replacement and durable directory creation where supported
+7. **Embedded assets** (`assets.go` at the module root, package `assets`): embeds `games.json` for `cmd/nvfp`. The shim sits in the root because `//go:embed` cannot leave its package directory and `games.json` must stay reachable at the published `raw/master/games.json` URL.
 
 ## Windows icon resources
 
-The application icon is a Windows PE resource, not a Go embed. `nvfp.rc` declares `1 ICON "nvfp.ico"` and `x86_64-w64-mingw32-windres` compiles it into `nvfp_res_windows_amd64.syso`, a COFF object holding the `.rsrc` section the Go linker merges into the executable. The `_windows_amd64` suffix makes the Go toolchain ignore the object on every other GOOS/GOARCH, so plain `go build`/`go vet`/`go test` keep working on Linux.
+The application icon is a Windows PE resource, not a Go embed. `nvfp.rc` declares `1 ICON "nvfp.ico"` and `x86_64-w64-mingw32-windres` compiles it into `cmd/nvfp/nvfp_res_windows_amd64.syso`, a COFF object holding the `.rsrc` section the Go linker merges into the executable. The `_windows_amd64` suffix makes the Go toolchain ignore the object on every other GOOS/GOARCH, so plain `go build`/`go vet`/`go test` keep working on Linux. The `.syso` lives in the package directory because `go/build` collects it as part of the package's file list; `nvfp.rc` and `nvfp.ico` stay at the repo root and `windres` runs from there, so the icon reference inside the object is unchanged.
 
 - The `.syso` is committed: `make build` must work without a MinGW toolchain installed. It is a generated artifact, so it only changes when `nvfp.rc` or `nvfp.ico` changes.
 - `make build` fails with an explicit message when the `.syso` is missing, rather than silently producing an icon-less binary.
@@ -73,7 +74,7 @@ gofmt -l .
 ## Code Conventions & Common Patterns
 
 - **Function length**: max 25 lines of code per function (comments excluded). Extract helpers early.
-- The root `main` package is split one file per responsibility (`main.go` CLI wiring, `version.go`, `manifest.go`, `patch.go`, `driver.go`, `doctor.go`, `list.go`, `paths.go`, `restore.go`, `models*.go`, `elevation*.go`); put new code in the matching file.
+- The `cmd/nvfp` package is split one file per responsibility (`main.go` CLI wiring, `version.go`, `manifest.go`, `patch.go`, `driver.go`, `doctor.go`, `list.go`, `paths.go`, `restore.go`, `models*.go`, `elevation*.go`); put new code in the matching file. `assets.go` at the module root embeds `games.json`.
 - Wrap errors with `fmt.Errorf("...: %w", err)`. Report non-fatal failures to stderr; return an error only when the caller should abort.
 - Use standard Go naming and table driven tests with `t.TempDir()`; use `httptest` for HTTP. Tests use the standard `testing` package and the `set` helper from `github.com/fernandoenzo/set` where a set is already in play — no test framework or mocking library.
 - Keep `XmlElement` generic so unknown fingerprint XML survives round-trips. `PatchGame` takes `*FingerprintDB` and `*db.Game`.

@@ -6,7 +6,7 @@
 *.dylib
 
 # Go build output
-nvfp
+/nvfp
 
 # Test binary
 *.test

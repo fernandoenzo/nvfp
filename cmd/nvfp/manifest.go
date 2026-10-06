@@ -1,16 +1,13 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 
+	assets "github.com/fernandoenzo/nvfp"
 	"github.com/fernandoenzo/nvfp/internal/db"
 	"github.com/fernandoenzo/nvfp/internal/update"
 )
-
-//go:embed games.json
-var bundledGames []byte
 
 func resolveGames() (*db.GameDB, error) {
 	if gamesJSONPath != "" {
@@ -35,5 +32,5 @@ func resolveGames() (*db.GameDB, error) {
 		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
 	}
 
-	return db.ResolveGames(cacheDir, bundledGames, data)
+	return db.ResolveGames(cacheDir, assets.Games, data)
 }

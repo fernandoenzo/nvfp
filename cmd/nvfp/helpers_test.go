@@ -24,7 +24,7 @@ func newTestGameDB() *db.GameDB {
 
 func newTestFingerprintDB(t *testing.T) *nvidia.FingerprintDB {
 	t.Helper()
-	db, err := nvidia.ParseFingerprintDB(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
+	db, err := nvidia.ParseFingerprintDB(filepath.Join("..", "..", "internal", "nvidia", "testdata", "fingerprint.db"))
 	if err != nil {
 		t.Fatalf("ParseFingerprintDB failed: %v", err)
 	}

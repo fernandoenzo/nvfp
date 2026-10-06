@@ -19,9 +19,9 @@ import (
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.0-rc.6"
+	version = "1.3.0-rc.7"
 	// versionDate is the release date shown by --version.
-	versionDate = "2026 Oct 2"
+	versionDate = "2026 Oct 6"
 )
 
 const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +

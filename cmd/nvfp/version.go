@@ -2,7 +2,7 @@ package main
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.0-rc.7"
+	version = "1.3.0-rc.8"
 	// versionDate is the release date shown by --version.
 	versionDate = "2026 Oct 6"
 )

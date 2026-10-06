@@ -93,6 +93,5 @@ const enumBatch = 32
 // MaxDriverString is the longest string an NVAPI unicode field can hold,
 // excluding the terminating NUL, derived from the buffer the binding actually
 // passes to the driver. internal/db keeps its own copy to validate the manifest
-// without importing this package; TestDriverStringLimitMatchesNVAPI in
-// main_test.go keeps the two in step.
+// without importing this package; driver_test.go keeps the two in step.
 const MaxDriverString = len(applicationV4{}.appName) - 1

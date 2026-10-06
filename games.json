@@ -58,7 +58,7 @@
     {
       "fingerprint": "the_witcher_3",
       "app_user_model_id": "CDPROJEKTSA.Witcher3GOTY_0xkrdv0gjmk28!bin.Gaming.Desktop.x64.witcher3",
-      "versions": ["uwp"],
+      "versions": ["*"],
       "overrides": {
         "DLSS_Override_No_OPS": "0"
       }

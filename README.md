@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/github/v/release/fernandoenzo/nvfp" alt="GitHub Release">
 </p>
 
-`nvfp` adds missing UWP game entries to NVIDIA App's `fingerprint.db`, registers the process string in the NVIDIA driver profile, and supports manifest overrides, restore and Streamline NGX repair.
+`nvfp` adds missing UWP game entries to NVIDIA App's `fingerprint.db`, registers the process string in the NVIDIA driver profile, and supports manifest overrides, restore and NGX cache reset.
 
 ## The problem
 
@@ -20,7 +20,7 @@ NVIDIA App's XML database often omits UWP games. Adding an entry makes the app r
 
 - Windows 11
 - **NVIDIA App** installed (the modern one, not GeForce Experience)
-- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched. The `--sl-override` repair also needs them, because `ProgramData\NVIDIA` is not writable by a normal user.
+- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched. The `--reset-models` step also needs them, because `ProgramData\NVIDIA` is not writable by a normal user.
 - **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
 ## Usage
@@ -49,6 +49,8 @@ What each symbol means:
 - **⊘** — already correct, nothing to do
 - **✗** — failed (fingerprint not found, no source version to build UWP from, driver profile missing or conflicting)
 
+The patch only takes effect after you **log out of Windows and sign back in** — no reboot needed. Without that, relaunching NVIDIA App and refreshing the games list still shows nothing: the ontology is rebuilt at session start. The program prints the same reminder whenever it actually modifies `fingerprint.db`.
+
 ### Preview changes without writing anything
 
 ```powershell
@@ -75,45 +77,36 @@ Driver profiles:
 
 Read-only and privilege-free: it asks the driver how each game's profile would resolve and prints every candidate it tried with the driver's own answer, then exits without writing anything. Use it whenever the driver step seems to do nothing — see [Diagnosing profile resolution](#diagnosing-profile-resolution-without-writing-anything).
 
-### Repair the Streamline OTA manifest
+### Reset the NVIDIA NGX models folder
 
 ```powershell
-.\nvfp.exe --sl-override
+.\nvfp.exe --reset-models
 ```
 
 ```
-NGX OTA manifest: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt
-  ✓ sl_common_0 payload restored from the sibling bundle
-  ✓ added [sl_reflex_0]  app_E658703 = 2.14.3
-  ✓ updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3
-  backup: C:\ProgramData\NVIDIA\NGX\models\nvngx_config.txt.bak
+Deleted C:\ProgramData\NVIDIA\NGX\models
+Note: log out of Windows and sign back in (no reboot needed); NVIDIA rebuilds the folder at the next session.
 ```
 
-The NVIDIA App's bootstrap can rewrite `nvngx_config.txt` and leave only the
-bundle sections (`[sl_sdk_0]`, `[sl_sdk_override_0]`, `[dlss]`…), dropping the
-per-feature ones. Streamline's interposer looks plugins up **per feature**, in
-two passes — `[sl_<feat>_override_0]` with `app_E658700` first, `[sl_<feat>_0]`
-with `app_E658703` second — so once those sections are gone both passes fail
-and the game silently falls back to its bundled plugins:
+The NVIDIA NGX OTA cache (the `models` folder) can end up incomplete: the NVIDIA
+App's bootstrap rewrites `nvngx_config.txt` and drops the per-feature sections,
+and the games silently fall back to their bundled plugins. Deleting the whole
+folder is enough to fix it — at the next session NVIDIA rebuilds it completely
+and with the optimal configuration, so there is no need to repair the manifest
+by hand.
 
-```
-Could not find version matching for plugin: reflex_override_0
-Could not find version matching for plugin: reflex_0
-Unable to find all requested plugins in OTA cache, OTA'd plugins will not be loaded!
-```
+`--reset-models` resolves the folder from `OTACachePath` in
+`HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to
+`C:\ProgramData\NVIDIA\NGX\models`, and refuses to delete anything whose last
+path component is not `models`. It requests administrator privileges through
+the UAC prompt (declining it means nothing is deleted and the error is
+reported), reports `Nothing to do` when the folder does not exist, and
+supports `--dry-run` (`Would delete <path>`, nothing touched).
 
-`--sl-override` reads each Streamline bundle's `nvngx_package_config.txt`, selects its highest numeric OTA,
-and discovers the bundle's hash and architecture. It adds missing per-feature sections, corrects stale
-versions, and restores payloads only from a matching `_0` / `_override_0` sibling with the same architecture;
-none of those bundle details are hard-coded.
-
-On the first manifest change it preserves `nvngx_config.txt.bak`. The new manifest is written to a unique temporary sibling, flushed to disk and then renamed over the old file, so a crash leaves either the previous manifest or the new one, never a half-written file. The containing directory is synced where the filesystem supports it; filesystems that refuse a directory flush are tolerated, since the rename has already happened.
-
-The parser rejects invalid UTF-8 and NUL bytes, accepts CRLF/LF/CR and a leading BOM, preserves unrecognized lines and unchanged spacing, and emits canonical UTF-8/CRLF output.
-
-After a successful repair, a fresh run makes no further changes. The operation is local and cannot be combined with `--list`, `--game`, `--games-json`, `--doctor`, `--no-driver` or `--restore`. Use `--dry-run` to preview it.
-
-The cache root is `OTACachePath` in `HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`, falling back to `C:\ProgramData\NVIDIA\NGX\models`. Features without a payload for the selected architecture are reported and skipped; another GPU's payload is not substituted. Run the repair after the NVIDIA App has started and before launching the game; repeat it after a driver or app update.
+The command is local and cannot be combined with `--list`, `--game`,
+`--games-json`, `--doctor`, `--no-driver` or `--restore`. Run it after the
+NVIDIA App has started and before launching the game; repeat it after a driver
+or app update.
 
 ### Skip the driver step
 
@@ -164,7 +157,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 
 `--restore` only restores `fingerprint.db`: the entries added to the driver profile database are **not** removed. They are additive, and NVIDIA may legitimately publish the same entries again through an OTA profile update. To remove a driver-profile entry, use NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, which expose the full DRS editing UI.
 
-`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor` or `--sl-override`. Combine it with `--dry-run` to preview the copy.
+`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor` or `--reset-models`. Combine it with `--dry-run` to preview the copy.
 
 ### Print the version
 
@@ -303,7 +296,9 @@ For each game with `versions: ["uwp"]`:
 4. Writes the patched database
 5. Registers the UWP string (package family name by default) in the game's driver profile through NVAPI, unless `--no-driver`
 
-With `--sl-override` instead, nothing above runs: it repairs only the NGX OTA manifest, as described in [Repair the Streamline OTA manifest](#repair-the-streamline-ota-manifest).
+With `--reset-models` instead, nothing above runs: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder).
+
+The patched games become visible only after a Windows logoff/logon (no reboot needed): the ontology is rebuilt at session start, and until then NVIDIA App keeps showing its cached list no matter how many times you refresh it. The program prints that reminder whenever it modifies the database.
 
 No backup is created beside `fingerprint.db`: NVIDIA App keeps its pristine copy
 under `NvBackend\DAO\<hash>\fingerprint.db`, which this tool never touches.
@@ -395,7 +390,7 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 ### Elevation
 
-The program checks its own token before touching anything. Unelevated, and with driver work pending (`--sl-override` requests it too, but only when it actually has something to write), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
+The program checks its own token before touching anything. Unelevated, and with driver work pending (`--reset-models` requests it too, but only when the folder exists), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. The child does the whole job — `fingerprint.db` included — so the prompt appears once, before any file is written. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
 The token is opened explicitly with `OpenProcessToken(CurrentProcess(), TOKEN_QUERY, ...)` and the elevation comes from `x/sys/windows.Token.IsElevated`: a failure to read it is reported as an error instead of being silently read as "not an administrator".
 

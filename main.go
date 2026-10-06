@@ -11,7 +11,6 @@ import (
 
 	"github.com/fernandoenzo/nvfp/internal/db"
 	"github.com/fernandoenzo/nvfp/internal/fsutil"
-	"github.com/fernandoenzo/nvfp/internal/ngx"
 	"github.com/fernandoenzo/nvfp/internal/nvdr"
 	"github.com/fernandoenzo/nvfp/internal/nvidia"
 	"github.com/fernandoenzo/nvfp/internal/update"
@@ -33,20 +32,28 @@ const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
 	"\n" +
 	"Written by Fernando Enzo Guarini.\n"
 
+// resetReloginHint follows a real models-folder reset: the folder comes back
+// only at the next session.
+const resetReloginHint = "Note: log out of Windows and sign back in (no reboot needed); NVIDIA rebuilds the folder at the next session."
+
+// patchReloginHint follows a real fingerprint.db patch: without a new session
+// the NVIDIA App keeps showing its cached game list.
+const patchReloginHint = "Note: log out of Windows and sign back in (no reboot needed) for the NVIDIA App to show the patched games."
+
 //go:embed games.json
 var bundledGames []byte
 
 var (
-	dryRun         bool
-	listOnly       bool
-	restoreFlag    bool
-	versionFlag    bool
-	noDriverFlag   bool
-	elevatedFlag   bool
-	doctorFlag     bool
-	slOverrideFlag bool
-	gameFilter     string
-	gamesJSONPath  string
+	dryRun          bool
+	listOnly        bool
+	restoreFlag     bool
+	versionFlag     bool
+	noDriverFlag    bool
+	elevatedFlag    bool
+	doctorFlag      bool
+	resetModelsFlag bool
+	gameFilter      string
+	gamesJSONPath   string
 )
 
 // newRootCmd builds the command tree. It is separate from main so tests can
@@ -75,7 +82,7 @@ func registerFlags(rootCmd *cobra.Command) {
 	rootCmd.Flags().BoolVar(&elevatedFlag, "elevated", false, "Internal: set after the UAC relaunch")
 	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
-	rootCmd.Flags().BoolVar(&slOverrideFlag, "sl-override", false, "Repair Streamline payloads and per-feature entries in the NGX cache")
+	rootCmd.Flags().BoolVar(&resetModelsFlag, "reset-models", false, "Delete the NVIDIA NGX models folder; NVIDIA rebuilds it at the next session")
 }
 
 // markExclusive declares the flag combinations that cannot be combined.
@@ -85,10 +92,10 @@ func markExclusive(rootCmd *cobra.Command) {
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
-	// The NGX repair reads the driver bundles, never the games manifest: it is
+	// The models reset works on the NGX cache, never the games manifest: it is
 	// incompatible with every manifest-related flag.
 	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
-		rootCmd.MarkFlagsMutuallyExclusive("sl-override", other)
+		rootCmd.MarkFlagsMutuallyExclusive("reset-models", other)
 	}
 }
 
@@ -99,7 +106,7 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// Version, restore and the NGX repair are local operations: they must not
+	// Version, restore and the models reset are local operations: they must not
 	// depend on the manifest, the cache, or the network.
 	switch {
 	case versionFlag:
@@ -107,8 +114,8 @@ func run(cmd *cobra.Command, args []string) error {
 		return nil
 	case restoreFlag:
 		return restoreDB()
-	case slOverrideFlag:
-		return runSLOverride(ngx.Root)
+	case resetModelsFlag:
+		return runResetModels(nvidiaModelsDir)
 	}
 	gameDB, err := resolveGames()
 	if err != nil {
@@ -125,14 +132,45 @@ func run(cmd *cobra.Command, args []string) error {
 	return patchEverything(gameDB)
 }
 
-// runSLOverride repairs the NGX cache, holding the elevated child's console
-// open when there is a real window to read. resolveRoot is ngx.Root in
-// production; tests inject a fixture directory instead.
-func runSLOverride(resolveRoot func() (string, error)) error {
+// runResetModels deletes the NGX models folder, holding the elevated child's
+// console open when there is a real window to read. resolveDir is
+// nvidiaModelsDir in production; tests inject a fixture directory instead.
+func runResetModels(resolveDir func() (string, error)) error {
 	if elevatedFlag && !stdoutIsPiped() {
 		defer pauseBeforeExit()
 	}
-	return applySLOverride(resolveRoot)
+	return resetModels(resolveDir)
+}
+
+// resetModels deletes the NGX OTA cache directory so NVIDIA rebuilds it whole
+// at the next session. The path must end in "models": anything else is refused
+// before any check, so a misresolved path can never delete an unrelated tree.
+func resetModels(resolveDir func() (string, error)) error {
+	dir, err := resolveDir()
+	if err != nil {
+		return err
+	}
+	if filepath.Base(filepath.Clean(dir)) != "models" {
+		return fmt.Errorf("refusing to delete %s: it is not an NGX models directory", dir)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("Nothing to do: %s does not exist\n", dir)
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", dir, err)
+	}
+	if dryRun {
+		fmt.Printf("Would delete %s\n", dir)
+		return nil
+	}
+	ensureElevated(true)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("deleting %s: %w", dir, err)
+	}
+	fmt.Printf("Deleted %s\n", dir)
+	fmt.Println(resetReloginHint)
+	return nil
 }
 
 // patchEverything patches fingerprint.db and, unless the step is disabled,
@@ -152,14 +190,20 @@ func patchEverything(gameDB *db.GameDB) error {
 	if err != nil {
 		return err
 	}
-	fdb, _, err := patchDB(gameDB, dbPath)
+	fdb, modified, err := patchDB(gameDB, dbPath)
 	if err != nil {
 		return err
 	}
-	if noDriverFlag {
-		return nil
+	if !noDriverFlag {
+		if err := applyDriverStep(gameDB, fdb); err != nil {
+			return err
+		}
 	}
-	return applyDriverStep(gameDB, fdb)
+	// patchDB reports a dry-run modification too, hence the extra guard.
+	if modified && !dryRun {
+		fmt.Println(patchReloginHint)
+	}
+	return nil
 }
 
 // restoreDB overwrites the working fingerprint.db with the pristine copy kept
@@ -213,95 +257,6 @@ func ensureElevated(wanted bool) {
 	default:
 		fmt.Fprintf(os.Stderr, "Warning: could not request administrator privileges: %v\n", err)
 	}
-}
-
-// applySLOverride repairs the NGX cache: it copies compatible sibling payloads,
-// adds missing per-feature sections and corrects stale versions. It backs up
-// the manifest before changing it and requests UAC only when work is pending.
-func applySLOverride(resolveRoot func() (string, error)) error {
-	root, err := resolveRoot()
-	if err != nil {
-		return err
-	}
-	plan, err := ngx.Inspect(root)
-	if err != nil {
-		return err
-	}
-	for _, warning := range plan.Warnings {
-		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
-	}
-	if dryRun {
-		printSLPlan(plan)
-		return nil
-	}
-	ensureElevated(plan.Changed())
-	if err := ngx.Apply(plan); err != nil {
-		return fmt.Errorf("updating the NGX manifest: %w", err)
-	}
-	printSLResult(plan)
-	return nil
-}
-
-// printSLPlan shows what the NGX repair would do, naming the files.
-func printSLPlan(plan *ngx.Plan) {
-	fmt.Printf("NGX OTA cache: %s\n  manifest: %s\n", plan.Root, plan.Manifest)
-	for _, cp := range plan.Copies {
-		fmt.Printf("  → would copy %s\n        to %s\n", cp.Source, cp.Dest)
-	}
-	for _, section := range plan.Additions {
-		fmt.Printf("  → would add [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
-	}
-	for _, section := range plan.Updates {
-		fmt.Printf("  → would update [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
-	}
-	printSLNoOp(plan)
-	warnMissingFeatures(plan)
-}
-
-// printSLResult reports the repair the way the patch steps do: one line per
-// change, using the same symbols.
-func printSLResult(plan *ngx.Plan) {
-	fmt.Printf("NGX OTA manifest: %s\n", plan.Manifest)
-	for _, cp := range plan.Copies {
-		fmt.Printf("  ✓ %s payload restored from the sibling bundle\n", cp.Feature)
-	}
-	for _, section := range plan.Additions {
-		fmt.Printf("  ✓ added [%s]  app_%s = %s\n", section.Feature, section.Hash, section.Version)
-	}
-	for _, section := range plan.Updates {
-		fmt.Printf("  ✓ updated [%s]  app_%s: %s → %s\n", section.Feature, section.Hash, section.Current, section.Version)
-	}
-	printSLNoOp(plan)
-	if len(plan.Additions) > 0 || len(plan.Updates) > 0 {
-		// The .bak is written only when the manifest itself changes.
-		fmt.Printf("  backup: %s\n", plan.Backup)
-	}
-	warnMissingFeatures(plan)
-}
-
-func printSLNoOp(plan *ngx.Plan) {
-	if plan.Changed() {
-		return
-	}
-	if len(plan.Missing) > 0 {
-		fmt.Println("  ⊘ no repairable changes: no matching-architecture payload is available for some features")
-		return
-	}
-	if len(plan.Warnings) > 0 {
-		fmt.Println("  ⊘ no repairable changes found; review the warnings for cache details")
-		return
-	}
-	fmt.Println("  ⊘ nothing to do: all discovered per-feature sections are present and current")
-}
-
-// warnMissingFeatures reports features with no payload for their discovered
-// architecture in either sibling variant.
-func warnMissingFeatures(plan *ngx.Plan) {
-	if len(plan.Missing) == 0 {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "Warning: no compatible-architecture payload for: %v\n", plan.Missing)
-	fmt.Fprintln(os.Stderr, "These features are skipped; payloads for another GPU architecture cannot be substituted.")
 }
 
 func resolveGames() (*db.GameDB, error) {

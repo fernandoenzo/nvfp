@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`nvfp` patches NVIDIA App's `fingerprint.db` for UWP games, registers the matching process string in the driver profile database, can restore the DAO copy, and can repair Streamline's NGX manifest.
+`nvfp` patches NVIDIA App's `fingerprint.db` for UWP games, registers the matching process string in the driver profile database, can restore the DAO copy, and can reset the NGX models folder.
 
 ## Architecture & Data Flow
 
@@ -41,13 +41,12 @@ findDAOFingerprintDB ──┐  (--restore)
 ```
 
 Architecture layers:
-1. **CLI layer** (`main.go`, `elevation_*.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--no-driver`, `--doctor`, `--sl-override`, `--elevated`, `--version`), orchestration, UAC relaunch, NGX repair flow
+1. **CLI layer** (`main.go`, `elevation_*.go`, `models_*.go`): Cobra commands (`newRootCmd`), flags (`--dry-run`, `--list`, `--restore`, `--game`, `--games-json`, `--no-driver`, `--doctor`, `--reset-models`, `--elevated`, `--version`), orchestration, UAC relaunch, models-reset flow
 2. **Data layer** (`internal/db`): Game manifest model, I/O, resolve fallback chain
 3. **Core logic layer** (`internal/nvidia`): XML fingerprint parsing/patching
 4. **Driver layer** (`internal/nvdr`): NVAPI DRS binding (Windows) + status/message types (all platforms)
-5. **NGX layer** (`internal/ngx`): Streamline OTA manifest repair (all platforms; the cache path comes from the Windows-only `Root`, which `runSLOverride` receives as an argument so tests can drive the repair against a fixture)
-6. **Network layer** (`internal/update`): Remote games.json fetch
-7. **Shared utilities** (`internal/fsutil`): staged file copy/replacement and durable directory creation where supported
+5. **Network layer** (`internal/update`): Remote games.json fetch
+6. **Shared utilities** (`internal/fsutil`): staged file copy/replacement and durable directory creation where supported
 
 ## Windows icon resources
 
@@ -81,11 +80,11 @@ gofmt -l .
 - Resolve profiles by exact `driver_profile` or `<DriverProfile>` candidates; never invent profiles. DRS matches process name, not package identity, and ignores `isMetro`.
 - NVAPI IDs and struct layouts are pinned with cross-platform tests and compile-time asserts. Driver strings are limited to 2047 UTF-16 units excluding NUL; never truncate.
 - `ensureElevated` is the single UAC path. `--restore` restores only `fingerprint.db`; DRS entries are additive.
+- `--reset-models` deletes the registry-resolved NGX models folder and refuses paths whose last component is not `models`. A `fingerprint.db` patch is visible only after a Windows logoff/logon; the program prints that reminder whenever it modifies the database.
 - **Version banner**: `--version`/`-v` is a plain bool flag handled at the top of `run()`. The banner is assembled in `main.go` from the `version` and `versionDate` constants; bump both on every release. It does **not** use Cobra's `Command.Version`/`SetVersionTemplate`: that path pulls `cobra.tmpl` → `text/template` (+`reflect`) into the binary (~+1.9 MB). Its shape mirrors the author's other CLIs (name, version, date, copyright, GPLv3+ notice, author).
 - Cache directory and `User-Agent` both use the `nvfp` name (`%LOCALAPPDATA%\nvfp`, fallback `~/.cache/nvfp`).
-- The manifest parser preserves opaque lines and value prefixes, validates UTF-8, rejects NUL, and writes canonical CRLF. `CopyFile` and `WriteFileAtomic` stage to unique sibling files, flush before replacement and sync directories where supported; OS/filesystem guarantees vary.
-- NGX selects the highest numeric OTA (lexical path breaks ties), warns only for malformed Streamline configs, and copies sibling payloads only for the same architecture. `Missing` means no compatible-architecture payload was found.
-- Keep the custom manifest parser; general INI/TOML/YAML libraries rewrite or misparse NVIDIA's format. HTTP fetches use a 10s timeout, 5MB limit and custom `User-Agent`.
+- `CopyFile` and `WriteFileAtomic` stage to unique sibling files, flush before replacement and sync directories where supported; OS/filesystem guarantees vary.
+- HTTP fetches use a 10s timeout, 5MB limit and custom `User-Agent`.
 
 ## Runtime/Tooling Preferences
 
@@ -101,7 +100,7 @@ gofmt -l .
 ## Testing & QA
 
 - Run `make test`, `go vet ./...`, and a Windows amd64 cross-build for Windows-only code.
-- Use XML fixtures for fingerprint round-trips, temporary trees for file/NGX behavior, and `httptest` for HTTP.
+- Use XML fixtures for fingerprint round-trips, temporary trees for file behavior, and `httptest` for HTTP.
 - NVAPI literal/layout tests run cross-platform; actual DRS calls require Windows and an NVIDIA driver.
 
 ## License

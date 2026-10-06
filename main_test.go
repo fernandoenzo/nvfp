@@ -817,271 +817,184 @@ func TestDriverStringLimitMatchesNVAPI(t *testing.T) {
 	}
 }
 
-// slFixture builds the NGX cache layout the --sl-override flow repairs: two
-// bundles, a manifest holding only the bundle sections, and payloads under the
-// override hash only.
-func slFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-		"nvngx_config.txt": "[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_sdk_override_0]\r\napp_E658700 = 2.14.0",
-		filepath.Join("sl_sdk_0", "versions", "134656", "files", "1B0_E658703", "nvngx_package_config.txt"):          "sl_common_0, 2.14.0, .dll, sl.common.dll\n",
-		filepath.Join("sl_sdk_override_0", "versions", "134656", "files", "1B0_E658700", "nvngx_package_config.txt"): "sl_common_override_0, 2.14.0, .dll, sl.common.dll\n",
-		filepath.Join("sl_common_override_0", "versions", "134656", "files", "1B0_E658700.dll"):                      "payload bytes",
+// TestResetModels drives the --reset-models step: the folder is deleted with
+// the logoff/logon reminder, a misresolved path is refused, --dry-run writes
+// nothing and a missing folder is a no-op.
+func TestResetModels(t *testing.T) {
+	fixture := func(t *testing.T) string {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), "models")
+		if err := os.MkdirAll(filepath.Join(dir, "sl_sdk_0"), 0o755); err != nil {
+			t.Fatalf("creating fixture: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "sl_sdk_0", "payload.dll"), []byte("bytes"), 0o644); err != nil {
+			t.Fatalf("writing fixture file: %v", err)
+		}
+		return dir
 	}
-	for name, content := range files {
-		writeFixtureFile(t, root, name, content)
+	flow := func(t *testing.T, dir string, dry bool) func() (string, error) {
+		t.Helper()
+		oldDry := dryRun
+		t.Cleanup(func() { dryRun = oldDry })
+		dryRun = dry
+		return func() (string, error) { return dir, nil }
 	}
-	return root
-}
 
-// writeFixtureFile writes a fixture file under root, creating its parents.
-func writeFixtureFile(t *testing.T, root, rel, content string) {
-	t.Helper()
-	path := filepath.Join(root, rel)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("creating %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("writing %s: %v", path, err)
-	}
-}
+	t.Run("deletes the folder and prints the reminder", func(t *testing.T) {
+		dir := fixture(t)
+		output := captureStdout(t, func() {
+			if err := resetModels(flow(t, dir, false)); err != nil {
+				t.Fatalf("resetModels() error: %v", err)
+			}
+		})
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("models folder still exists: %v", err)
+		}
+		if !strings.Contains(output, "Deleted ") || !strings.Contains(output, "log out of Windows") {
+			t.Errorf("output misses the deletion or the reminder:\n%s", output)
+		}
+	})
 
-// slFlow turns the --sl-override flow on against root and restores the global
-// afterwards, returning the fixture root resolver the flow must run with.
-func slFlow(t *testing.T, root string, dry bool) func() (string, error) {
-	t.Helper()
-	oldDry := dryRun
-	t.Cleanup(func() { dryRun = oldDry })
-	dryRun = dry
-	return func() (string, error) { return root, nil }
-}
+	t.Run("refuses a path that is not a models directory", func(t *testing.T) {
+		dir := t.TempDir()
+		err := resetModels(flow(t, dir, false))
+		if err == nil || !strings.Contains(err.Error(), "refusing to delete") {
+			t.Errorf("resetModels() error = %v, want a refusal", err)
+		}
+		if _, statErr := os.Stat(dir); statErr != nil {
+			t.Errorf("refused directory was touched: %v", statErr)
+		}
+	})
 
-// TestSLOverride drives the whole --sl-override flow: dispatch order,
-// --dry-run, idempotence, and the stale/missing repair end to end.
-// Each subtest builds its own cache fixture and runs the flow with a fixture
-// root resolver, so the real ngx.Root is never consulted.
-func TestSLOverride(t *testing.T) {
-	// Dispatch: --sl-override must reach the NGX repair before run() resolves
-	// the games manifest. Off Windows the real Root is unreachable by design,
-	// which makes the dispatch observable through the error; on Windows the
-	// repair would touch the real OTA cache, so the assertion cannot run.
+	t.Run("dry run deletes nothing", func(t *testing.T) {
+		dir := fixture(t)
+		output := captureStdout(t, func() {
+			if err := resetModels(flow(t, dir, true)); err != nil {
+				t.Fatalf("resetModels() with --dry-run error: %v", err)
+			}
+		})
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("--dry-run deleted the folder: %v", err)
+		}
+		if !strings.Contains(output, "Would delete ") {
+			t.Errorf("dry-run output does not describe the deletion:\n%s", output)
+		}
+	})
+
+	t.Run("missing folder reports nothing to do", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "models")
+		output := captureStdout(t, func() {
+			if err := resetModels(flow(t, dir, false)); err != nil {
+				t.Fatalf("resetModels() error: %v", err)
+			}
+		})
+		if !strings.Contains(output, "Nothing to do") {
+			t.Errorf("missing folder not reported as nothing to do:\n%s", output)
+		}
+	})
+
+	// Dispatch: --reset-models must reach the models reset before run()
+	// resolves the games manifest. Off Windows the real folder is unreachable
+	// by design, which makes the dispatch observable through the error; on
+	// Windows the reset would touch the real models folder, so the assertion
+	// cannot run.
 	t.Run("dispatches before resolving the manifest", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
-			t.Skip("ngx.Root reads the real OTA cache on Windows")
+			t.Skip("nvidiaModelsDir reads the real models folder on Windows")
 		}
-		oldFlag, oldPath := slOverrideFlag, gamesJSONPath
-		t.Cleanup(func() { slOverrideFlag, gamesJSONPath = oldFlag, oldPath })
-		slOverrideFlag = true
+		oldFlag, oldPath := resetModelsFlag, gamesJSONPath
+		t.Cleanup(func() { resetModelsFlag, gamesJSONPath = oldFlag, oldPath })
+		resetModelsFlag = true
 		gamesJSONPath = filepath.Join(t.TempDir(), "does-not-exist.json")
 
 		err := run(nil, nil)
 		if err == nil {
-			t.Fatal("run() with --sl-override returned nil without a reachable NGX root")
+			t.Fatal("run() with --reset-models returned nil without a reachable models folder")
 		}
 		if strings.Contains(err.Error(), "loading games database") {
-			t.Errorf("run() resolved the games manifest before the NGX repair: %v", err)
+			t.Errorf("run() resolved the games manifest before the models reset: %v", err)
 		}
 	})
+}
 
-	t.Run("repairs the cache and backs up the manifest", func(t *testing.T) {
-		root := slFixture(t)
-		resolve := slFlow(t, root, false)
+// reloginFixture builds a patchable fingerprint.db tree under a fresh
+// LOCALAPPDATA, points the manifest at one game and disables the driver step.
+func reloginFixture(t *testing.T) string {
+	t.Helper()
+	localAppData := t.TempDir()
+	t.Setenv("LOCALAPPDATA", localAppData)
+	ontology := filepath.Join(localAppData, "NVIDIA Corporation", "NVIDIA App",
+		"NvBackend", "ApplicationOntology", "data", "fingerprint.db")
+	data, err := os.ReadFile(filepath.Join("internal", "nvidia", "testdata", "fingerprint.db"))
+	if err != nil {
+		t.Fatalf("reading testdata fingerprint.db: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(ontology), 0o755); err != nil {
+		t.Fatalf("creating ontology dir: %v", err)
+	}
+	if err := os.WriteFile(ontology, data, 0o644); err != nil {
+		t.Fatalf("writing working fingerprint.db: %v", err)
+	}
+	manifest := filepath.Join(localAppData, "games.json")
+	content := `{"version":1,"games":[{"fingerprint":"final_fantasy_vii_remake","app_user_model_id":"39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping","versions":["uwp"]}]}`
+	if err := os.WriteFile(manifest, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing games.json: %v", err)
+	}
 
-		if err := runSLOverride(resolve); err != nil {
-			t.Fatalf("runSLOverride() error: %v", err)
-		}
+	oldJSON, oldNoDriver, oldDry := gamesJSONPath, noDriverFlag, dryRun
+	t.Cleanup(func() { gamesJSONPath, noDriverFlag, dryRun = oldJSON, oldNoDriver, oldDry })
+	gamesJSONPath, noDriverFlag = manifest, true
+	return ontology
+}
 
-		manifest, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
-		}
-		for _, want := range []string{"[sl_common_0]", "app_E658703 = 2.14.0", "[sl_common_override_0]", "app_E658700 = 2.14.0"} {
-			if !strings.Contains(string(manifest), want) {
-				t.Errorf("manifest missing %q:\n%s", want, manifest)
-			}
-		}
-		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
-			t.Errorf("the plain bundle payload was not filled from the sibling: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); err != nil {
-			t.Errorf("no backup was written: %v", err)
-		}
-	})
+// TestReloginHintAfterPatch pins when the logoff/logon reminder is printed:
+// after a real fingerprint.db modification, never on a no-op or dry run.
+func TestReloginHintAfterPatch(t *testing.T) {
+	t.Run("prints after a real patch, not on the second run", func(t *testing.T) {
+		reloginFixture(t)
+		dryRun = false
 
-	t.Run("dry run writes nothing", func(t *testing.T) {
-		root := slFixture(t)
-		resolve := slFlow(t, root, true)
-
-		before, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
-		}
-		output := captureStdout(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("runSLOverride() with --dry-run error: %v", err)
+		first := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run() error: %v", err)
 			}
 		})
-		after, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
+		if !strings.Contains(first, "log out of Windows and sign back in") {
+			t.Errorf("first run did not print the relogin hint:\n%s", first)
+		}
+
+		second := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("second run() error: %v", err)
+			}
+		})
+		if strings.Contains(second, "log out of Windows and sign back in") {
+			t.Errorf("second run printed the hint without patching:\n%s", second)
+		}
+	})
+
+	t.Run("dry-run prints no hint and writes nothing", func(t *testing.T) {
+		working := reloginFixture(t)
+		dryRun = true
+		before, err := os.ReadFile(working)
 		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
+			t.Fatalf("reading working fingerprint.db: %v", err)
+		}
+
+		output := captureStdout(t, func() {
+			if err := run(nil, nil); err != nil {
+				t.Fatalf("run() with --dry-run error: %v", err)
+			}
+		})
+		if strings.Contains(output, "log out of Windows and sign back in") {
+			t.Errorf("--dry-run printed the relogin hint:\n%s", output)
+		}
+		after, err := os.ReadFile(working)
+		if err != nil {
+			t.Fatalf("re-reading working fingerprint.db: %v", err)
 		}
 		if string(before) != string(after) {
-			t.Error("--dry-run modified the manifest")
-		}
-		if _, err := os.Stat(filepath.Join(root, "nvngx_config.txt.bak")); !os.IsNotExist(err) {
-			t.Errorf("--dry-run wrote a backup: %v", err)
-		}
-		if !strings.Contains(output, "would add [sl_common_0]") {
-			t.Errorf("dry-run output does not describe the pending section:\n%s", output)
-		}
-	})
-
-	t.Run("idempotent", func(t *testing.T) {
-		root := slFixture(t)
-		resolve := slFlow(t, root, false)
-
-		if err := runSLOverride(resolve); err != nil {
-			t.Fatalf("first runSLOverride() error: %v", err)
-		}
-		first, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
-		}
-		output := captureStdout(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("second runSLOverride() error: %v", err)
-			}
-		})
-		second, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
-		}
-		if string(first) != string(second) {
-			t.Errorf("the second run changed the manifest:\n%q\n%q", first, second)
-		}
-		if !strings.Contains(output, "nothing to do") {
-			t.Errorf("the second run did not report that there was nothing to do:\n%s", output)
-		}
-	})
-
-	// A payload copy is real work: the report must never claim there was
-	// nothing to do while it filled a missing file.
-	t.Run("copy only is not nothing to do", func(t *testing.T) {
-		root := t.TempDir()
-		writeFixtureFile(t, root, "nvngx_config.txt",
-			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n[sl_common_0]\r\napp_E658703 = 2.14.0")
-		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
-			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
-		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/1B0_E658700.dll", "payload bytes")
-		resolve := slFlow(t, root, false)
-
-		output := captureStdout(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("runSLOverride: %v", err)
-			}
-		})
-		if _, err := os.Stat(filepath.Join(root, "sl_common_0", "versions", "134656", "files", "1B0_E658703.dll")); err != nil {
-			t.Fatalf("payload not copied from the sibling: %v", err)
-		}
-		if strings.Contains(output, "nothing to do") {
-			t.Errorf("the report claims nothing to do after copying a payload:\n%s", output)
-		}
-		if !strings.Contains(output, "payload restored from the sibling bundle") {
-			t.Errorf("the report does not name the payload copy:\n%s", output)
-		}
-		if strings.Contains(output, "backup:") {
-			t.Errorf("copy-only repair reported a manifest backup:\n%s", output)
-		}
-	})
-
-	t.Run("missing other-architecture payload is reported accurately", func(t *testing.T) {
-		root := t.TempDir()
-		writeFixtureFile(t, root, "nvngx_config.txt", "[sl_sdk_0]\r\n")
-		writeFixtureFile(t, root, "sl_sdk_0/versions/134656/files/1B0_E658703/nvngx_package_config.txt",
-			"sl_common_0, 2.14.0, .dll, sl.common.dll\n")
-		writeFixtureFile(t, root, "sl_common_override_0/versions/134656/files/160_E658700.dll", "other-arch")
-		resolve := slFlow(t, root, false)
-
-		stdout, stderr := captureOutput(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("runSLOverride: %v", err)
-			}
-		})
-		if !strings.Contains(stdout, "no repairable changes") || strings.Contains(stdout, "present and current") {
-			t.Errorf("result does not explain that repair was skipped:\n%s", stdout)
-		}
-		if !strings.Contains(stderr, "no compatible-architecture payload") || strings.Contains(stderr, "not been published") {
-			t.Errorf("warning misstates the other-architecture payload:\n%s", stderr)
-		}
-	})
-
-	t.Run("no Streamline bundle does not claim every section is current", func(t *testing.T) {
-		root := t.TempDir()
-		writeFixtureFile(t, root, "nvngx_config.txt", "[sl_sdk_0]\r\napp_E658703 = 2.14.0")
-		resolve := slFlow(t, root, false)
-
-		stdout, stderr := captureOutput(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("runSLOverride: %v", err)
-			}
-		})
-		if !strings.Contains(stderr, "no Streamline") {
-			t.Errorf("missing-cache warning not reported: %s", stderr)
-		}
-		if !strings.Contains(stdout, "review the warnings") || strings.Contains(stdout, "present and current") {
-			t.Errorf("result implies the uninspected cache is current:\n%s", stdout)
-		}
-	})
-
-	// The whole repair in one run: a comment, a per-feature section pinning an
-	// outdated version, sections missing entirely, and payloads missing under
-	// one hash. Regression test for the stale-version gap inherited from the
-	// PowerShell.
-	t.Run("stale and missing", func(t *testing.T) {
-		root := t.TempDir()
-		writeFixtureFile(t, root, "nvngx_config.txt",
-			"; NVIDIA NGX OTA cache\r\n"+
-				"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n"+
-				"[sl_common_0]\r\napp_E658703=2.14.0\r\n")
-		writeFixtureFile(t, root, "sl_sdk_0/versions/134659/files/1B0_E658703/nvngx_package_config.txt",
-			"sl_common_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_0, 2.14.3, .dll, sl.reflex.dll\n")
-		writeFixtureFile(t, root, "sl_sdk_override_0/versions/134659/files/1B0_E658700/nvngx_package_config.txt",
-			"sl_common_override_0, 2.14.3, .dll, sl.common.dll\nsl_reflex_override_0, 2.14.3, .dll, sl.reflex.dll\n")
-		writeFixtureFile(t, root, "sl_common_override_0/versions/134659/files/1B0_E658700.dll", "common")
-		writeFixtureFile(t, root, "sl_reflex_override_0/versions/134659/files/1B0_E658700.dll", "reflex")
-		resolve := slFlow(t, root, false)
-
-		output := captureStdout(t, func() {
-			if err := runSLOverride(resolve); err != nil {
-				t.Fatalf("runSLOverride: %v", err)
-			}
-		})
-		got, err := os.ReadFile(filepath.Join(root, "nvngx_config.txt"))
-		if err != nil {
-			t.Fatalf("reading manifest: %v", err)
-		}
-		// The comment survives, the stale section is corrected keeping its `=`
-		// spacing, and the missing sections are appended blank-line separated.
-		want := "; NVIDIA NGX OTA cache\r\n" +
-			"[sl_sdk_0]\r\napp_E658703 = 2.14.0\r\n\r\n" +
-			"[sl_common_0]\r\napp_E658703=2.14.3\r\n\r\n" +
-			"[sl_reflex_0]\r\napp_E658703 = 2.14.3\r\n\r\n" +
-			"[sl_common_override_0]\r\napp_E658700 = 2.14.3\r\n\r\n" +
-			"[sl_reflex_override_0]\r\napp_E658700 = 2.14.3\r\n"
-		if string(got) != want {
-			t.Errorf("manifest mismatch\n got %q\nwant %q", got, want)
-		}
-		if !strings.Contains(output, "updated [sl_common_0]  app_E658703: 2.14.0 → 2.14.3") {
-			t.Errorf("output does not report the version correction:\n%s", output)
-		}
-		for _, payload := range []string{
-			"sl_common_0/versions/134659/files/1B0_E658703.dll",
-			"sl_reflex_0/versions/134659/files/1B0_E658703.dll",
-		} {
-			if _, err := os.Stat(filepath.Join(root, payload)); err != nil {
-				t.Errorf("payload not filled from the sibling: %s: %v", payload, err)
-			}
+			t.Error("--dry-run modified fingerprint.db")
 		}
 	})
 }

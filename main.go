@@ -36,6 +36,10 @@ const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
 // only at the next session.
 const resetReloginHint = "Note: log out of Windows and sign back in (no reboot needed); NVIDIA rebuilds the folder at the next session."
 
+// resetDLSSHint follows a real models-folder reset: the dlss-family payloads
+// inside models are only created when a DLSS game first runs.
+const resetDLSSHint = "Note: after signing back in, open any DLSS game once (until its main menu) and close it before playing: NVIDIA creates the dlss payloads in models only on that first run."
+
 // patchReloginHint follows a real fingerprint.db patch: without a new session
 // the NVIDIA App keeps showing its cached game list.
 const patchReloginHint = "Note: log out of Windows and sign back in (no reboot needed) for the NVIDIA App to show the patched games."
@@ -170,6 +174,7 @@ func resetModels(resolveDir func() (string, error)) error {
 	}
 	fmt.Printf("Deleted %s\n", dir)
 	fmt.Println(resetReloginHint)
+	fmt.Println(resetDLSSHint)
 	return nil
 }
 

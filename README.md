@@ -86,6 +86,7 @@ Read-only and privilege-free: it asks the driver how each game's profile would r
 ```
 Deleted C:\ProgramData\NVIDIA\NGX\models
 Note: log out of Windows and sign back in (no reboot needed); NVIDIA rebuilds the folder at the next session.
+Note: after signing back in, open any DLSS game once (until its main menu) and close it before playing: NVIDIA creates the dlss payloads in models only on that first run.
 ```
 
 The NVIDIA NGX OTA cache (the `models` folder) can end up incomplete: the NVIDIA
@@ -107,6 +108,13 @@ The command is local and cannot be combined with `--list`, `--game`,
 `--games-json`, `--doctor`, `--no-driver` or `--restore`. Run it after the
 NVIDIA App has started and before launching the game; repeat it after a driver
 or app update.
+
+**After the session restart, warm the cache up once:** open any DLSS game,
+wait until it reaches the main menu and close it; after that, play whatever you
+want. NVIDIA App rebuilds `models` and every `sl_` bundle at session start, but
+the `dlss`-family folders inside `models` are created only when a DLSS game
+runs for the first time after the reset — until then, DLSS titles still find no
+payloads.
 
 ### Skip the driver step
 

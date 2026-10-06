@@ -853,6 +853,9 @@ func TestResetModels(t *testing.T) {
 		if !strings.Contains(output, "Deleted ") || !strings.Contains(output, "log out of Windows") {
 			t.Errorf("output misses the deletion or the reminder:\n%s", output)
 		}
+		if !strings.Contains(output, "open any DLSS game once") {
+			t.Errorf("output misses the DLSS warm-up note:\n%s", output)
+		}
 	})
 
 	t.Run("refuses a path that is not a models directory", func(t *testing.T) {

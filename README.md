@@ -123,7 +123,11 @@ Patches `fingerprint.db` only. No UAC prompt, no NVAPI call: use it when you don
 .\nvfp.exe --list
 ```
 
-The list starts with the database version and count, then prints each fingerprint and any available app/driver identity fields. The entries depend on the resolved `games.json`.
+The list starts with the database version and count, then prints each fingerprint and any available app/driver identity fields. The entries depend on the resolved `games.json`. Combine it with `--game` to list a single entry:
+
+```powershell
+.\nvfp.exe --list --game final_fantasy_vii_remake
+```
 
 ### Patch a single game
 
@@ -158,7 +162,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 
 `--restore` only restores `fingerprint.db`: the entries added to the driver profile database are **not** removed. They are additive, and NVIDIA may legitimately publish the same entries again through an OTA profile update. To remove a driver-profile entry, use NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, which expose the full DRS editing UI.
 
-`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor` or `--reset-models`. Combine it with `--dry-run` to preview the copy.
+`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor`, `--reset-models` or `--version`. Combine it with `--dry-run` to preview the copy.
 
 ### Print the version
 

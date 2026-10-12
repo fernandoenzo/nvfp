@@ -316,7 +316,7 @@ For each game with `app_user_model_id` (or an explicit `driver_app`), the progra
 
 1. Resolves the driver profile:
    - `driver_profile` set → looked up by that exact name
-   - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. The driver stores such names lowercased, so a lowercase attempt follows each miss.
+   - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. Each candidate is tried in several spellings: as written, with backslashes turned into forward slashes, and as its bare file name, each also lowercased — the fingerprint spells paths with Windows separators (`End\Binaries\Win64\game.exe`) while the driver database stores them forward-slashed (`end/binaries/win64/game.exe`) or without their directory.
 2. Enumerates the profile's applications and skips the game if the string is already there (case-insensitive).
 3. Otherwise adds the string (the package family name, e.g. `39EA002F.EXED1_n746a19ndrrjg`) with `NvAPI_DRS_CreateApplication`, leaving every other field at zero exactly like NvidiaProfileInspectorRevamped does.
 4. Saves the database once per run, only if something was added.

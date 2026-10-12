@@ -160,7 +160,7 @@ func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 func (a *api) diagnoseCandidates(session uintptr, candidates []string) []LookupAttempt {
 	var attempts []LookupAttempt
 	for _, candidate := range candidates {
-		for _, attempt := range []string{candidate, strings.ToLower(candidate)} {
+		for _, attempt := range profileLookupAttempts(candidate) {
 			entry := LookupAttempt{Attempt: attempt}
 			handle, stat := a.findApplicationByName(session, attempt)
 			entry.Status = stat
@@ -390,22 +390,21 @@ func (a *api) findProfile(session uintptr, req Request) (uintptr, string, Result
 	}
 }
 
-// findCandidateProfile walks the fingerprint's executables, retrying each one
-// lowercased because the driver stores those names in its own casing.
+// findCandidateProfile walks the fingerprint's executables, retrying the
+// spellings the driver database may actually hold.
 func (a *api) findCandidateProfile(session uintptr, req Request) (uintptr, string, Result, bool) {
 	for _, candidate := range req.Candidates {
-		handle, status := a.findApplicationByName(session, candidate)
-		if status == statusExecutableNotFound {
-			handle, status = a.findApplicationByName(session, strings.ToLower(candidate))
+		for _, attempt := range profileLookupAttempts(candidate) {
+			handle, status := a.findApplicationByName(session, attempt)
+			if status != statusOK {
+				continue
+			}
+			info, infoStatus := a.getProfileInfo(session, handle)
+			if infoStatus != statusOK {
+				return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
+			}
+			return handle, fromUTF16(info.profileName[:]), Result{}, true
 		}
-		if status != statusOK {
-			continue
-		}
-		info, infoStatus := a.getProfileInfo(session, handle)
-		if infoStatus != statusOK {
-			return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
-		}
-		return handle, fromUTF16(info.profileName[:]), Result{}, true
 	}
 	return 0, "", newResult(StatusProfileUnresolved, req, ""), false
 }

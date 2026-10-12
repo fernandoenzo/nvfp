@@ -47,30 +47,38 @@ func loadFingerprintForDoctor() *nvidia.FingerprintDB {
 	return parsed
 }
 
-// reportRequest prints one game's resolution: its identity, every candidate
-// the driver answered for, and a hint when nothing matched.
+// reportRequest prints one game's resolution: its identity, every lookup the
+// driver answered, and a hint when nothing matched. A pinned profile is
+// resolved by name, so its report is a single lookup, not a candidate list.
 func reportRequest(req nvdr.Request, attempts []nvdr.LookupAttempt) {
 	fmt.Printf("\n%s\n", req.Fingerprint)
 	fmt.Printf("  application string : %s\n", req.App)
 	if req.Profile != "" {
 		fmt.Printf("  pinned profile     : %s\n", req.Profile)
-	}
-	if len(req.Candidates) == 0 {
-		fmt.Println("  candidates         : none (fingerprint not found, or it has no <DriverProfile>)")
-		if req.Profile == "" {
-			printUnresolvedHint()
+		if !printAttempts(attempts) {
+			printPinnedHint(req.Profile)
 		}
 		return
 	}
+	if len(req.Candidates) == 0 {
+		fmt.Println("  candidates         : none (fingerprint not found, or it has no <DriverProfile>)")
+		printUnresolvedHint()
+		return
+	}
 	fmt.Println("  candidates         :")
+	if !printAttempts(attempts) {
+		printUnresolvedHint()
+	}
+}
+
+// printAttempts renders every lookup and reports whether any of them matched.
+func printAttempts(attempts []nvdr.LookupAttempt) bool {
 	matched := false
 	for _, attempt := range attempts {
 		printAttempt(attempt)
 		matched = matched || attempt.Status == 0
 	}
-	if !matched {
-		printUnresolvedHint()
-	}
+	return matched
 }
 
 // printAttempt renders one candidate lookup with its NVAPI status, or the
@@ -85,4 +93,9 @@ func printAttempt(attempt nvdr.LookupAttempt) {
 
 func printUnresolvedHint() {
 	fmt.Println("  => unresolved: set \"driver_profile\" in games.json with the exact name from NVIDIA Control Panel")
+}
+
+func printPinnedHint(profile string) {
+	fmt.Println("  => unresolved: the pinned name does not exist in the driver database, and no profile is ever created")
+	fmt.Printf("     check %q in NVIDIA Control Panel and fix driver_profile in games.json\n", profile)
 }

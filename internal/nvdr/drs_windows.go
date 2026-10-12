@@ -139,8 +139,10 @@ func (a *api) findProfileByName(session uintptr, name string) (uintptr, int32) {
 	return handle, int32(r)
 }
 
-// Diagnose resolves each request as Apply does, but only returns lookup attempts.
-// It never saves settings; the outer result slice has one entry per request.
+// Diagnose resolves each request the way Apply does, but only returns lookup
+// attempts. A pinned profile is looked up by its exact name, like Apply does;
+// otherwise every candidate spelling is tried. It never saves settings, and the
+// outer result slice has one entry per request.
 func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 	a, session, err := openSession(false)
 	if err != nil {
@@ -149,9 +151,27 @@ func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 	defer a.destroySession(session)
 	report := make([][]LookupAttempt, 0, len(reqs))
 	for _, req := range reqs {
+		if req.Profile != "" {
+			report = append(report, a.diagnoseProfile(session, req.Profile))
+			continue
+		}
 		report = append(report, a.diagnoseCandidates(session, req.Candidates))
 	}
 	return report, nil
+}
+
+// diagnoseProfile resolves a profile pinned by name, exactly as Apply does, so
+// --doctor reports the same answer the registration step would get.
+func (a *api) diagnoseProfile(session uintptr, name string) []LookupAttempt {
+	entry := LookupAttempt{Attempt: name}
+	handle, status := a.findProfileByName(session, name)
+	entry.Status = status
+	if status == statusOK {
+		if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
+			entry.Profile = fromUTF16(info.profileName[:])
+		}
+	}
+	return []LookupAttempt{entry}
 }
 
 // diagnoseCandidates resolves every candidate string, and its lowercase

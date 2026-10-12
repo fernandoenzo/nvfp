@@ -219,6 +219,50 @@ func TestPatchGame_OverrideCollapsesDuplicatedElement(t *testing.T) {
 		t.Errorf("Image elements = %v, want exactly one with only.exe", values)
 	}
 }
+
+func TestPatchGame_RejectsInvalidElementNames(t *testing.T) {
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	if err != nil {
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		remove    []string
+	}{
+		{name: "invalid overrides key", overrides: map[string]string{"<evil>": "x"}},
+		{name: "namespaced overrides key", overrides: map[string]string{"ns:foo": "x"}},
+		{name: "invalid remove entry", remove: []string{"with space"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := PatchGame(db, &gamesdb.Game{
+				Fingerprint:    "epic_only_game",
+				AppUserModelID: "P!A",
+				Versions:       []string{"uwp"},
+				Overrides:      tt.overrides,
+				Remove:         tt.remove,
+			})
+			if result.Status != StatusInvalid {
+				t.Errorf("status = %q, want %q (%s)", result.Status, StatusInvalid, result.Message)
+			}
+			if !strings.Contains(result.Message, "not a valid XML element name") {
+				t.Errorf("message = %q, want an element-name complaint", result.Message)
+			}
+		})
+	}
+
+	// A valid name still passes.
+	if result := PatchGame(db, &gamesdb.Game{
+		Fingerprint:    "epic_only_game",
+		AppUserModelID: "P!A",
+		Versions:       []string{"uwp"},
+		Overrides:      map[string]string{"DLSS_Override_No_OPS": "0"},
+	}); result.Status != StatusPatched {
+		t.Errorf("valid override rejected: %q (%s)", result.Status, result.Message)
+	}
+}
 func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 

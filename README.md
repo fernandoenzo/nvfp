@@ -201,8 +201,8 @@ Defines which games to patch and how. The program downloads it automatically fro
 | `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id`. Set it to the game's `.exe` when the game launches as a plain executable — see [`app_user_model_id` vs `driver_app`](#app_user_model_id-vs-driver_app-why-both-exist) |
 | `skip_driver` | bool | Leave the driver database untouched for this game. The `fingerprint.db` patch still runs; `driver_app` and `driver_profile` are ignored |
 | `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
-| `overrides` | map | XML fields to overwrite or add in the version |
-| `remove` | []string | XML fields to delete from the version |
+| `overrides` | map | XML fields to overwrite or add in the version. Keys must be valid XML element names |
+| `remove` | []string | XML fields to delete from the version. Entries must be valid XML element names |
 
 `driver_app`, `driver_profile` and `app_user_model_id` are limited to 2047 UTF-16 units (the NVAPI limit, measured in code units, not runes); the manifest is rejected otherwise.
 

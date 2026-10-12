@@ -2,6 +2,7 @@ package nvidia
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -19,6 +20,7 @@ const (
 	StatusNotFound        PatchStatus = "not_found"
 	StatusNoSource        PatchStatus = "no_source"
 	StatusVersionNotFound PatchStatus = "version_not_found"
+	StatusInvalid         PatchStatus = "invalid"
 )
 
 // PatchResult holds the result of a single game patch operation.
@@ -43,6 +45,9 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 	if fp == nil {
 		return patchResult(StatusNotFound, "fingerprint %q not found in database", game.Fingerprint)
 	}
+	if err := checkElementNames(game); err != nil {
+		return patchResult(StatusInvalid, "%v", err)
+	}
 	plan := resolveVersions(fp, game)
 	var added, updated, already []string
 	if plan.addUWP {
@@ -61,6 +66,23 @@ func PatchGame(fdb *FingerprintDB, game *db.Game) PatchResult {
 		}
 	}
 	return summarize(game.Fingerprint, added, updated, already, plan.missing)
+}
+
+// checkElementNames rejects overrides keys and removals that are not valid XML
+// element names. The manifest loader already rejects them; this guards the
+// package's public entry point so no caller can write a malformed database.
+func checkElementNames(game *db.Game) error {
+	for _, key := range slices.Sorted(maps.Keys(game.Overrides)) {
+		if !db.ValidElementName(key) {
+			return fmt.Errorf("overrides key %q is not a valid XML element name", key)
+		}
+	}
+	for _, name := range game.Remove {
+		if !db.ValidElementName(name) {
+			return fmt.Errorf("remove entry %q is not a valid XML element name", name)
+		}
+	}
+	return nil
 }
 
 // resolveVersions resolves the manifest request against the fingerprint: the

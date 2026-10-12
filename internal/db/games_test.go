@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/xml"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,6 +52,65 @@ func TestLoadFromBytes(t *testing.T) {
 	}
 	if len(db.Games[1].Remove) != 1 || db.Games[1].Remove[0] != "WhisperModePopsFactor" {
 		t.Errorf("expected remove [WhisperModePopsFactor]")
+	}
+}
+
+func TestValidElementName(t *testing.T) {
+	tests := []struct {
+		name string
+		ok   bool
+	}{
+		{"DriverProfile", true},
+		{"DLSS_Override_No_OPS", true},
+		{"ok-name_1.x", true},
+		{"_private", true},
+		{"a", true},
+		{"中文", false},
+		{"café", false},
+		{"ȫ", false},
+		{"ﬁ", false},
+		{"", false},
+		{"1abc", false},
+		{"-lead", false},
+		{".dot", false},
+		{"ns:foo", false},
+		{"with space", false},
+		{"<evil>", false},
+		{"a:b", false},
+		{"a\tb", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ValidElementName(tt.name); got != tt.ok {
+				t.Errorf("ValidElementName(%q) = %v, want %v", tt.name, got, tt.ok)
+			}
+		})
+	}
+}
+
+// TestValidElementNameMatchesParser pins the rule to what encoding/xml accepts:
+// the patched database must re-parse in the tool itself.
+func TestValidElementNameMatchesParser(t *testing.T) {
+	candidates := []string{"DriverProfile", "ok-name_1.x", "_private", "中文", "café", "ȫ", "ﬁ", "ǅ", "1abc", "ns:foo", "with space", "<evil>", ""}
+	for _, name := range candidates {
+		if !ValidElementName(name) {
+			continue
+		}
+		out, err := xml.Marshal(struct {
+			XMLName xml.Name
+			Value   string `xml:",chardata"`
+		}{XMLName: xml.Name{Local: name}, Value: "v"})
+		if err != nil {
+			t.Errorf("ValidElementName(%q) accepted, marshal failed: %v", name, err)
+			continue
+		}
+		var back struct {
+			XMLName xml.Name
+			Value   string `xml:",chardata"`
+		}
+		if err := xml.Unmarshal(out, &back); err != nil {
+			t.Errorf("ValidElementName(%q) accepted but %q does not re-parse: %v", name, out, err)
+		}
 	}
 }
 
@@ -138,6 +198,26 @@ func TestLoadFromBytesValidation(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "game 1 is null") {
 			t.Errorf("error = %v, want it to name the null entry", err)
+		}
+	})
+	t.Run("invalid overrides key rejected", func(t *testing.T) {
+		data := []byte(`{"version":1,"games":[{"fingerprint":"x","app_user_model_id":"P!A","versions":["uwp"],"overrides":{"<evil>":"1"}}]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for an invalid overrides key")
+		}
+		if !strings.Contains(err.Error(), "overrides key") {
+			t.Errorf("error = %v, want it to name the overrides key", err)
+		}
+	})
+	t.Run("invalid remove entry rejected", func(t *testing.T) {
+		data := []byte(`{"version":1,"games":[{"fingerprint":"x","app_user_model_id":"P!A","versions":["uwp"],"remove":["ns:foo"]}]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for an invalid remove entry")
+		}
+		if !strings.Contains(err.Error(), "remove entry") {
+			t.Errorf("error = %v, want it to name the remove entry", err)
 		}
 	})
 }

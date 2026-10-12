@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf16"
 
@@ -133,7 +136,24 @@ func validateGame(g *Game) error {
 			return fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
 		}
 	}
+	for _, key := range slices.Sorted(maps.Keys(g.Overrides)) {
+		if !ValidElementName(key) {
+			return fmt.Errorf("game %q: overrides key %q is not a valid XML element name", g.Fingerprint, key)
+		}
+	}
+	for _, name := range g.Remove {
+		if !ValidElementName(name) {
+			return fmt.Errorf("game %q: remove entry %q is not a valid XML element name", g.Fingerprint, name)
+		}
+	}
 	return nil
+}
+
+var reElementName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*\z`)
+
+// ValidElementName reports whether name can be written as an XML element name.
+func ValidElementName(name string) bool {
+	return reElementName.MatchString(name)
 }
 
 // LoadFromPath loads games.json from a file path.

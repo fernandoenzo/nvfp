@@ -102,7 +102,7 @@ func applyPatches(fdb *nvidia.FingerprintDB, games []*db.Game) bool {
 			fmt.Printf("  ✓ %s\n", result.Message)
 		case nvidia.StatusAlreadyPresent:
 			fmt.Printf("  ⊘ %s\n", result.Message)
-		case nvidia.StatusNotFound, nvidia.StatusNoSource, nvidia.StatusVersionNotFound:
+		case nvidia.StatusNotFound, nvidia.StatusNoSource, nvidia.StatusVersionNotFound, nvidia.StatusInvalid:
 			fmt.Printf("  ✗ %s\n", result.Message)
 		}
 	}

@@ -201,7 +201,7 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 	if addUWP {
 		forcedFields = buildUWPForcedFields(appID)
 	}
-	overrideSet := buildOverrideSet(overrides, forcedFields)
+	overrideSet := buildOverrideSet(overrides, forcedFields, elementNames(src))
 
 	name := src.Name
 	if addUWP {
@@ -214,6 +214,16 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 	placed := replacePreservedElements(built, src, removeSet, overrideSet)
 	appendOverrides(built, overrideSet, placed)
 	return built
+}
+
+// elementNames maps each lowercased element name to the casing the source uses,
+// so an override keeps the capitalization of the element it replaces.
+func elementNames(src *Version) map[string]string {
+	names := make(map[string]string, len(src.Elements))
+	for _, elem := range src.Elements {
+		names[strings.ToLower(elem.ElementName())] = elem.ElementName()
+	}
+	return names
 }
 
 // buildRemoveSet creates a set of element names to remove when building a version.
@@ -244,14 +254,20 @@ func buildUWPForcedFields(appID string) map[string]string {
 
 // buildOverrideSet builds the unified override lookup: every override key
 // (lowercased) mapped to the element to emit. Forced fields provide defaults
-// that user overrides take priority over.
-func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string]XmlElement {
+// that user overrides take priority over. When a key matches an element the
+// source already carries, the emitted element keeps that element's casing.
+func buildOverrideSet(overrides map[string]string, forcedFields map[string]string, existing map[string]string) map[string]XmlElement {
 	overrideSet := make(map[string]XmlElement, len(overrides)+len(forcedFields))
 	// forcedFields first so user overrides take priority.
 	for _, fields := range []map[string]string{forcedFields, overrides} {
 		for k, v := range fields {
-			overrideSet[strings.ToLower(k)] = XmlElement{
-				XMLName: xml.Name{Local: k},
+			key := strings.ToLower(k)
+			name := k
+			if canonical, ok := existing[key]; ok {
+				name = canonical
+			}
+			overrideSet[key] = XmlElement{
+				XMLName: xml.Name{Local: name},
 				Content: v,
 			}
 		}

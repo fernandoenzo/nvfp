@@ -810,6 +810,61 @@ func elementNamesInOrder(v *Version) []string {
 	return names
 }
 
+func TestPatchGame_OverrideKeepsElementCasing(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// The manifest spells the key lowercase; the source carries <EpicAppId>.
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint: "epic_only_game",
+		Versions:    []string{"epic"},
+		Overrides:   map[string]string{"epicappid": "CHANGED"},
+	})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
+	}
+
+	var names, values []string
+	for _, e := range findVersion(FindFingerprint(db, "epic_only_game"), "epic").Elements {
+		if strings.EqualFold(e.ElementName(), "EpicAppId") {
+			names = append(names, e.ElementName())
+			values = append(values, e.Content)
+		}
+	}
+	if len(names) != 1 {
+		t.Fatalf("EpicAppId appeared %d times, want 1 (names=%v)", len(names), names)
+	}
+	if names[0] != "EpicAppId" {
+		t.Errorf("element name = %q, want the source casing EpicAppId", names[0])
+	}
+	if values[0] != "CHANGED" {
+		t.Errorf("value = %q, want CHANGED", values[0])
+	}
+}
+
+func TestPatchGame_NewOverrideKeepsManifestCasing(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+
+	// No element to replace: the key is emitted exactly as the manifest spells it.
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint: "epic_only_game",
+		Versions:    []string{"epic"},
+		Overrides:   map[string]string{"BrandNewField": "v"},
+	})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
+	}
+
+	found := false
+	for _, e := range findVersion(FindFingerprint(db, "epic_only_game"), "epic").Elements {
+		if e.ElementName() == "BrandNewField" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("new override element BrandNewField not emitted with its manifest casing")
+	}
+}
+
 func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 	fp := FindFingerprint(db, "final_fantasy_vii_remake")

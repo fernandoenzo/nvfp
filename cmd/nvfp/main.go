@@ -56,6 +56,10 @@ func markExclusive(rootCmd *cobra.Command) {
 	rootCmd.MarkFlagsMutuallyExclusive("restore", "games-json")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
+	rootCmd.MarkFlagsMutuallyExclusive("list", "doctor")
+	for _, other := range []string{"list", "restore", "doctor", "reset-models"} {
+		rootCmd.MarkFlagsMutuallyExclusive("version", other)
+	}
 	// The models reset works on the NGX cache, never the games manifest: it is
 	// incompatible with every manifest-related flag.
 	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
@@ -88,7 +92,11 @@ func run(cmd *cobra.Command, args []string) error {
 	// List and doctor never touch the driver database.
 	switch {
 	case listOnly:
-		listGames(gameDB)
+		games, err := filterGames(gameDB)
+		if err != nil {
+			return err
+		}
+		listGames(gameDB.Version, games)
 		return nil
 	case doctorFlag:
 		return doctor(gameDB)

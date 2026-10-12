@@ -14,7 +14,7 @@ func TestListGames(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	listGames(gameDB)
+	listGames(gameDB.Version, gameDB.Games)
 
 	w.Close()
 	os.Stdout = old

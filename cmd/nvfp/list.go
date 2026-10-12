@@ -8,10 +8,10 @@ import (
 	"github.com/fernandoenzo/nvfp/internal/db"
 )
 
-func listGames(gameDB *db.GameDB) {
-	fmt.Printf("Games database version: %d\n", gameDB.Version)
-	fmt.Printf("Total games: %d\n\n", len(gameDB.Games))
-	for _, game := range gameDB.Games {
+func listGames(version int, games []*db.Game) {
+	fmt.Printf("Games database version: %d\n", version)
+	fmt.Printf("Total games: %d\n\n", len(games))
+	for _, game := range games {
 		printGameEntry(game)
 	}
 }

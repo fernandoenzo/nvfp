@@ -32,5 +32,5 @@ func resolveGames() (*db.GameDB, error) {
 		fmt.Fprintf(os.Stderr, "Warning: could not download remote games.json: %v\n", err)
 	}
 
-	return db.ResolveGames(cacheDir, assets.Games, data)
+	return db.ResolveGames(cacheDir, assets.Games, data, !dryRun)
 }

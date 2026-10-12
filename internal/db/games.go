@@ -162,13 +162,13 @@ func SaveToPath(db *GameDB, path string) error {
 
 // ResolveGames loads the games database with priority: remote > cache > bundled.
 // An empty cacheDir disables the cache layer (no read, no write).
-func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte) (*GameDB, error) {
+func ResolveGames(cacheDir string, bundledData []byte, remoteData []byte, writeCache bool) (*GameDB, error) {
 	if remoteData != nil {
 		gameDB, err := LoadFromBytes(remoteData)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: remote games.json parse failed: %v\n", err)
 		} else {
-			if cacheDir != "" {
+			if cacheDir != "" && writeCache {
 				if err := SaveToPath(gameDB, filepath.Join(cacheDir, "games.json")); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: could not cache games database: %v\n", err)
 				}

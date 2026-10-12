@@ -173,7 +173,7 @@ func TestSaveAndLoad(t *testing.T) {
 func TestResolveGamesBundled(t *testing.T) {
 	data := []byte(`{"version":1,"games":[{"fingerprint":"test","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 
-	db, err := ResolveGames(t.TempDir(), data, nil)
+	db, err := ResolveGames(t.TempDir(), data, nil, true)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestResolveGamesRemote(t *testing.T) {
 	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_user_model_id":"Pkg!App2","versions":["uwp"]}]}`)
 
 	cacheDir := t.TempDir()
-	db, err := ResolveGames(cacheDir, bundled, remote)
+	db, err := ResolveGames(cacheDir, bundled, remote, true)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestResolveGamesNoCacheDir(t *testing.T) {
 	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_user_model_id":"Pkg!App2","versions":["uwp"]}]}`)
 
 	// Empty cacheDir: remote is used but nothing is written to disk.
-	db, err := ResolveGames("", bundled, remote)
+	db, err := ResolveGames("", bundled, remote, true)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestResolveGamesNoCacheDir(t *testing.T) {
 	}
 
 	// Empty cacheDir with no remote: bundled fallback, no cache read.
-	db, err = ResolveGames("", bundled, nil)
+	db, err = ResolveGames("", bundled, nil, true)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -227,11 +227,46 @@ func TestResolveGamesNoCacheDir(t *testing.T) {
 	}
 }
 
+func TestResolveGamesNoCacheWrite(t *testing.T) {
+	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
+	remote := []byte(`{"version":2,"games":[{"fingerprint":"remote","app_user_model_id":"Pkg!App2","versions":["uwp"]}]}`)
+
+	cacheDir := t.TempDir()
+	cached := []byte(`{"version":3,"games":[{"fingerprint":"cached","app_user_model_id":"Pkg!App3","versions":["uwp"]}]}`)
+	cachePath := filepath.Join(cacheDir, "games.json")
+	if err := os.WriteFile(cachePath, cached, 0o644); err != nil {
+		t.Fatalf("writing cache: %v", err)
+	}
+
+	db, err := ResolveGames(cacheDir, bundled, remote, false)
+	if err != nil {
+		t.Fatalf("ResolveGames failed: %v", err)
+	}
+	if db.Games[0].Fingerprint != "remote" {
+		t.Errorf("expected remote game, got %s", db.Games[0].Fingerprint)
+	}
+	got, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("reading cache: %v", err)
+	}
+	if string(got) != string(cached) {
+		t.Errorf("cache was rewritten in read-only mode: %s", got)
+	}
+
+	db, err = ResolveGames(cacheDir, bundled, nil, false)
+	if err != nil {
+		t.Fatalf("ResolveGames failed: %v", err)
+	}
+	if db.Games[0].Fingerprint != "cached" {
+		t.Errorf("expected cached game, got %s", db.Games[0].Fingerprint)
+	}
+}
+
 func TestResolveGamesFallbackToBundled(t *testing.T) {
 	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 	cacheDir := t.TempDir()
 
-	db, err := ResolveGames(cacheDir, bundled, nil)
+	db, err := ResolveGames(cacheDir, bundled, nil, true)
 	if err != nil {
 		t.Fatalf("ResolveGames failed: %v", err)
 	}
@@ -244,7 +279,7 @@ func TestResolveGamesRemoteParseError(t *testing.T) {
 	bundled := []byte(`{"version":1,"games":[{"fingerprint":"bundled","app_user_model_id":"Pkg!App","versions":["uwp"]}]}`)
 	remote := []byte(`not json`)
 	cacheDir := t.TempDir()
-	db, err := ResolveGames(cacheDir, bundled, remote)
+	db, err := ResolveGames(cacheDir, bundled, remote, true)
 	if err != nil {
 		t.Fatalf("ResolveGames should fall back to bundled on remote parse error: %v", err)
 	}
@@ -285,7 +320,7 @@ func TestResolveGamesCorruptCache(t *testing.T) {
 		var gameDB *GameDB
 		var err error
 		stderr := captureStderr(t, func() {
-			gameDB, err = ResolveGames(cacheDir, bundled, nil)
+			gameDB, err = ResolveGames(cacheDir, bundled, nil, true)
 		})
 		if err != nil {
 			t.Fatalf("ResolveGames should fall back to bundled on corrupt cache: %v", err)
@@ -304,7 +339,7 @@ func TestResolveGamesCorruptCache(t *testing.T) {
 		var gameDB *GameDB
 		var err error
 		stderr := captureStderr(t, func() {
-			gameDB, err = ResolveGames(cacheDir, bundled, nil)
+			gameDB, err = ResolveGames(cacheDir, bundled, nil, true)
 		})
 		if err != nil {
 			t.Fatalf("ResolveGames failed: %v", err)

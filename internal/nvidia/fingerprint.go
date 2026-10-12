@@ -211,8 +211,8 @@ func buildVersion(src *Version, appID string, overrides map[string]string, remov
 		Name:     name,
 		Elements: make([]XmlElement, 0, len(src.Elements)+len(overrideSet)),
 	}
-	copyPreservedElements(built, src, removeSet, overrideSet)
-	applyOverrides(built, overrideSet)
+	placed := replacePreservedElements(built, src, removeSet, overrideSet)
+	appendOverrides(built, overrideSet, placed)
 	return built
 }
 
@@ -243,8 +243,8 @@ func buildUWPForcedFields(appID string) map[string]string {
 }
 
 // buildOverrideSet builds the unified override lookup: every override key
-// (lowercased) mapped to the element to append. Forced fields provide
-// defaults that user overrides take priority over.
+// (lowercased) mapped to the element to emit. Forced fields provide defaults
+// that user overrides take priority over.
 func buildOverrideSet(overrides map[string]string, forcedFields map[string]string) map[string]XmlElement {
 	overrideSet := make(map[string]XmlElement, len(overrides)+len(forcedFields))
 	// forcedFields first so user overrides take priority.
@@ -259,21 +259,35 @@ func buildOverrideSet(overrides map[string]string, forcedFields map[string]strin
 	return overrideSet
 }
 
-// copyPreservedElements copies source elements that survive filtering.
-func copyPreservedElements(dst *Version, src *Version, removeSet *set.Set[string], overrideSet map[string]XmlElement) {
+// replacePreservedElements copies the surviving source elements in order,
+// substituting each overridden one in place and collapsing duplicates to it.
+func replacePreservedElements(dst *Version, src *Version, removeSet *set.Set[string], overrideSet map[string]XmlElement) *set.Set[string] {
+	placed := set.New[string](len(overrideSet))
 	for _, elem := range src.Elements {
 		nameLower := strings.ToLower(elem.ElementName())
-		_, overrides := overrideSet[nameLower]
-		if removeSet.Contains(nameLower) || overrides {
+		if override, overridden := overrideSet[nameLower]; overridden {
+			if placed.Contains(nameLower) {
+				continue
+			}
+			dst.Elements = append(dst.Elements, override)
+			placed.Add(nameLower)
+			continue
+		}
+		if removeSet.Contains(nameLower) {
 			continue
 		}
 		dst.Elements = append(dst.Elements, elem)
 	}
+	return placed
 }
 
-// applyOverrides appends override elements, sorted by key for deterministic output.
-func applyOverrides(dst *Version, overrideSet map[string]XmlElement) {
+// appendOverrides appends the overrides that replaced no existing element,
+// sorted by key for deterministic output.
+func appendOverrides(dst *Version, overrideSet map[string]XmlElement, placed *set.Set[string]) {
 	for _, k := range slices.Sorted(maps.Keys(overrideSet)) {
+		if placed.Contains(k) {
+			continue
+		}
 		dst.Elements = append(dst.Elements, overrideSet[k])
 	}
 }

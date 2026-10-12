@@ -188,6 +188,37 @@ func TestPatchGame(t *testing.T) {
 	}
 }
 
+func TestPatchGame_OverrideCollapsesDuplicatedElement(t *testing.T) {
+	db, err := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	if err != nil {
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
+	}
+	fp := FindFingerprint(db, "already_uwp_game")
+	uwp := findVersion(fp, "uwp")
+	uwp.Elements = append(uwp.Elements,
+		XmlElement{XMLName: xml.Name{Local: "Image"}, Content: "a.exe"},
+		XmlElement{XMLName: xml.Name{Local: "Image"}, Content: "b.exe"},
+	)
+
+	result := PatchGame(db, &gamesdb.Game{
+		Fingerprint: "already_uwp_game",
+		Versions:    []string{"uwp"},
+		Overrides:   map[string]string{"Image": "only.exe"},
+	})
+	if result.Status != StatusPatched {
+		t.Fatalf("status = %q, want %q", result.Status, StatusPatched)
+	}
+
+	var values []string
+	for _, e := range findVersion(fp, "uwp").Elements {
+		if e.ElementName() == "Image" {
+			values = append(values, e.Content)
+		}
+	}
+	if len(values) != 1 || values[0] != "only.exe" {
+		t.Errorf("Image elements = %v, want exactly one with only.exe", values)
+	}
+}
 func TestPatchGame_UpdateExistingUWP(t *testing.T) {
 	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
 
@@ -729,8 +760,9 @@ func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
 		}
 	}
 
-	// applyOverrides emits elements sorted by lowercased key
-	want := []string{"appusermodelid", "distributor", "uwppackagefamilyname"}
+	// Distributor replaces the source Distributor in place (the source carries
+	// one); AppUserModelId and UWPPackageFamilyName are appended sorted.
+	want := []string{"distributor", "appusermodelid", "uwppackagefamilyname"}
 	if len(order) != len(want) {
 		t.Fatalf("forced field count = %d, want %d (got %v)", len(order), len(want), order)
 	}
@@ -739,6 +771,43 @@ func TestAddUWPVersion_ForcedFieldOrder(t *testing.T) {
 			t.Errorf("forced field at position %d = %q, want %q", i, got, want[i])
 		}
 	}
+}
+
+func TestPatchGame_IdempotentFromFirstRun(t *testing.T) {
+	db, _ := ParseFingerprintDB(filepath.Join("testdata", "fingerprint.db"))
+	game := gamesdb.Game{
+		Fingerprint:    "final_fantasy_vii_remake",
+		AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping",
+		Versions:       []string{"uwp"},
+		Overrides:      map[string]string{"DLSS_Override_No_OPS": "0"},
+	}
+
+	first := PatchGame(db, &game)
+	if first.Status != StatusPatched {
+		t.Fatalf("first status = %q, want %q", first.Status, StatusPatched)
+	}
+	orderAfterFirst := elementNamesInOrder(findVersion(FindFingerprint(db, "final_fantasy_vii_remake"), "uwp"))
+
+	// The version created on the first pass must already be a fixed point: the
+	// second pass finds it complete and leaves the element order untouched.
+	second := PatchGame(db, &game)
+	if second.Status != StatusAlreadyPresent {
+		t.Errorf("second status = %q, want %q", second.Status, StatusAlreadyPresent)
+	}
+	orderAfterSecond := elementNamesInOrder(findVersion(FindFingerprint(db, "final_fantasy_vii_remake"), "uwp"))
+
+	if strings.Join(orderAfterFirst, ",") != strings.Join(orderAfterSecond, ",") {
+		t.Errorf("element order changed between passes:\n  first  = %v\n  second = %v", orderAfterFirst, orderAfterSecond)
+	}
+}
+
+// elementNamesInOrder returns a version's element names in document order.
+func elementNamesInOrder(v *Version) []string {
+	names := make([]string, 0, len(v.Elements))
+	for _, e := range v.Elements {
+		names = append(names, e.ElementName())
+	}
+	return names
 }
 
 func TestAddUWPVersion_NonForcedOverrideOrder(t *testing.T) {

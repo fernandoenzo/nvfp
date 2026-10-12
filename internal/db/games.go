@@ -97,7 +97,12 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 	if len(db.Games) == 0 {
 		return nil, fmt.Errorf("games database contains no games")
 	}
-	for _, g := range db.Games {
+	for i, g := range db.Games {
+		// json/v2 decodes a JSON null entry into a nil pointer; every later
+		// step dereferences the games, so reject it here instead of panicking.
+		if g == nil {
+			return nil, fmt.Errorf("game %d is null", i)
+		}
 		if err := validateGame(g); err != nil {
 			return nil, err
 		}

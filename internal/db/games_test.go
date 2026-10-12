@@ -120,6 +120,26 @@ func TestLoadFromBytesValidation(t *testing.T) {
 			t.Fatal("expected error for game without versions")
 		}
 	})
+	t.Run("null game entry rejected instead of panicking", func(t *testing.T) {
+		data := []byte(`{"version":1,"games":[null]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for a null game entry")
+		}
+		if !strings.Contains(err.Error(), "game 0 is null") {
+			t.Errorf("error = %v, want it to name the null entry", err)
+		}
+	})
+	t.Run("null entry among valid games rejected", func(t *testing.T) {
+		data := []byte(`{"version":1,"games":[{"fingerprint":"x","app_user_model_id":"P!A","versions":["uwp"]},null]}`)
+		_, err := LoadFromBytes(data)
+		if err == nil {
+			t.Fatal("expected error for a null game entry")
+		}
+		if !strings.Contains(err.Error(), "game 1 is null") {
+			t.Errorf("error = %v, want it to name the null entry", err)
+		}
+	})
 }
 
 func TestSaveAndLoad(t *testing.T) {

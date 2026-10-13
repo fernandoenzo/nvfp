@@ -316,7 +316,7 @@ For each game with `app_user_model_id` (or an explicit `driver_app`), the progra
 
 1. Resolves the driver profile:
    - `driver_profile` set → looked up by that exact name
-   - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. Each candidate is tried in several spellings: as written, with backslashes turned into forward slashes, and as its bare file name, each also lowercased — the fingerprint spells paths with Windows separators (`End\Binaries\Win64\game.exe`) while the driver database stores them forward-slashed (`end/binaries/win64/game.exe`) or without their directory.
+   - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. The string goes to `NvAPI_DRS_FindApplicationByName` exactly as the fingerprint spells it: the driver's own lookup already copes with separators, letter case, and entries registered without their directory, so no variants are generated.
 2. Builds the list of strings to register: the package family name derived from `app_user_model_id` (when the game has one), then every `driver_app` entry in order, with duplicates removed using the same case folding the driver applies (`strings.EqualFold`).
 3. For each string, enumerates the profile's applications and skips it if it is already there (case-insensitive). Otherwise adds it (e.g. `39EA002F.EXED1_n746a19ndrrjg`, then `ff7rebirth.exe`) with `NvAPI_DRS_CreateApplication`, leaving every other field at zero exactly like NvidiaProfileInspectorRevamped does. A string that conflicts with another profile or fails to register is reported on its own; the remaining strings are still attempted.
 4. Saves the database once per run, only if something was added.
@@ -363,16 +363,15 @@ final_fantasy_vii_rebirth
   application string : 39EA002F.EXED2_n746a19ndrrjg
   application string : ff7rebirth.exe
   candidates         :
-      ✓ end/binaries/win64/ff7rebirth_.exe          matched profile "FINAL FANTASY VII REBIRTH"
+      ✓ End\Binaries\Win64\ff7rebirth_.exe          matched profile "FINAL FANTASY VII REBIRTH"
 ```
 
-When nothing matches, every attempt is listed with the driver's own status, so the fix is visible instead of guessed:
+The string is sent as the fingerprint spells it — backslashes included — and the driver still finds the entry.
+
+When nothing matches, the candidate is listed with the driver's own status, so the fix is visible instead of guessed:
 
 ```
       ✗ End\Binaries\Win64\ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
-      ✗ end\binaries\win64\ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
-      ✗ end/binaries/win64/ff7rebirth_.exe          NVAPI_EXECUTABLE_NOT_FOUND
-      ✗ ff7rebirth_.exe                             NVAPI_EXECUTABLE_NOT_FOUND
   => unresolved: set "driver_profile" in games.json with the exact name from NVIDIA Control Panel
 ```
 

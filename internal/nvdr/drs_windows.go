@@ -141,8 +141,8 @@ func (a *api) findProfileByName(session uintptr, name string) (uintptr, int32) {
 
 // Diagnose resolves each request the way Apply does, but only returns lookup
 // attempts. A pinned profile is looked up by its exact name, like Apply does;
-// otherwise every candidate spelling is tried. It never saves settings, and the
-// outer result slice has one entry per request.
+// otherwise the fingerprint's candidates are tried literally. It never saves
+// settings, and the outer result slice has one entry per request.
 func Diagnose(reqs []Request) ([][]LookupAttempt, error) {
 	a, session, err := openSession(false)
 	if err != nil {
@@ -174,23 +174,20 @@ func (a *api) diagnoseProfile(session uintptr, name string) []LookupAttempt {
 	return []LookupAttempt{entry}
 }
 
-// diagnoseCandidates resolves every candidate string, and its lowercase
-// retry, the way Apply would, reporting each answer with the profile it
-// matched.
+// diagnoseCandidates resolves every candidate string the way Apply would,
+// reporting each answer with the profile it matched.
 func (a *api) diagnoseCandidates(session uintptr, candidates []string) []LookupAttempt {
-	var attempts []LookupAttempt
+	attempts := make([]LookupAttempt, 0, len(candidates))
 	for _, candidate := range candidates {
-		for _, attempt := range profileLookupAttempts(candidate) {
-			entry := LookupAttempt{Attempt: attempt}
-			handle, stat := a.findApplicationByName(session, attempt)
-			entry.Status = stat
-			if stat == statusOK {
-				if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
-					entry.Profile = fromUTF16(info.profileName[:])
-				}
+		entry := LookupAttempt{Attempt: candidate}
+		handle, stat := a.findApplicationByName(session, candidate)
+		entry.Status = stat
+		if stat == statusOK {
+			if info, infoStat := a.getProfileInfo(session, handle); infoStat == statusOK {
+				entry.Profile = fromUTF16(info.profileName[:])
 			}
-			attempts = append(attempts, entry)
 		}
+		attempts = append(attempts, entry)
 	}
 	return attempts
 }
@@ -419,21 +416,19 @@ func (a *api) findProfile(session uintptr, req Request) (uintptr, string, Result
 	}
 }
 
-// findCandidateProfile walks the fingerprint's executables, retrying the
-// spellings the driver database may actually hold.
+// findCandidateProfile walks the fingerprint's executables until one is
+// registered in a profile the driver knows.
 func (a *api) findCandidateProfile(session uintptr, req Request) (uintptr, string, Result, bool) {
 	for _, candidate := range req.Candidates {
-		for _, attempt := range profileLookupAttempts(candidate) {
-			handle, status := a.findApplicationByName(session, attempt)
-			if status != statusOK {
-				continue
-			}
-			info, infoStatus := a.getProfileInfo(session, handle)
-			if infoStatus != statusOK {
-				return 0, candidate, newRequestResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
-			}
-			return handle, fromUTF16(info.profileName[:]), Result{}, true
+		handle, status := a.findApplicationByName(session, candidate)
+		if status != statusOK {
+			continue
 		}
+		info, infoStatus := a.getProfileInfo(session, handle)
+		if infoStatus != statusOK {
+			return 0, candidate, newRequestResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
+		}
+		return handle, fromUTF16(info.profileName[:]), Result{}, true
 	}
 	return 0, "", newRequestResult(StatusProfileUnresolved, req, ""), false
 }

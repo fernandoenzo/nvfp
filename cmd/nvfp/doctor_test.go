@@ -23,36 +23,42 @@ func TestReportRequest(t *testing.T) {
 	}{
 		{
 			name:     "candidate resolves and reports the matched profile",
-			req:      nvdr.Request{Fingerprint: "final_fantasy_vii_remake", App: "39EA002F.EXED1_n746a19ndrrjg", Candidates: []string{"End\\Binaries\\Win64\\ff7remake_.exe"}},
+			req:      nvdr.Request{Fingerprint: "final_fantasy_vii_remake", Apps: []string{"39EA002F.EXED1_n746a19ndrrjg"}, Candidates: []string{"End\\Binaries\\Win64\\ff7remake_.exe"}},
 			attempts: []nvdr.LookupAttempt{match},
 			want:     []string{"final_fantasy_vii_remake", "39EA002F.EXED1_n746a19ndrrjg", "candidates", "✓", "Final Fantasy VII Remake"},
 			absent:   []string{"unresolved"},
 		},
 		{
 			name:     "candidates all miss and the report asks for driver_profile",
-			req:      nvdr.Request{Fingerprint: "the_witcher_3", App: "CDPROJEKTSA.Witcher3GOTY_0xkrdv0gjmk28", Candidates: []string{"bin/x64/witcher3.exe"}},
+			req:      nvdr.Request{Fingerprint: "the_witcher_3", Apps: []string{"CDPROJEKTSA.Witcher3GOTY_0xkrdv0gjmk28"}, Candidates: []string{"bin/x64/witcher3.exe"}},
 			attempts: []nvdr.LookupAttempt{miss},
 			want:     []string{"the_witcher_3", "✗", "NVAPI_EXECUTABLE_NOT_FOUND", "unresolved", "driver_profile"},
 		},
 		{
 			name:     "no fingerprint entry explains why there are no candidates",
-			req:      nvdr.Request{Fingerprint: "missing_game", App: "Pkg!App"},
+			req:      nvdr.Request{Fingerprint: "missing_game", Apps: []string{"Pkg!App"}},
 			attempts: nil,
 			want:     []string{"candidates         : none", "unresolved"},
 		},
 		{
 			name:     "pinned profile names the lookup and the fix",
-			req:      nvdr.Request{Fingerprint: "pinned_game", App: "game.exe", Profile: "Renamed Profile"},
+			req:      nvdr.Request{Fingerprint: "pinned_game", Apps: []string{"game.exe"}, Profile: "Renamed Profile"},
 			attempts: []nvdr.LookupAttempt{{Attempt: "Renamed Profile", Status: -163}},
 			want:     []string{"pinned profile     : Renamed Profile", "✗", "NVAPI_PROFILE_NOT_FOUND", "no profile is ever created", "Renamed Profile"},
 			absent:   []string{"candidates"},
 		},
 		{
 			name:     "pinned profile that exists reports the match",
-			req:      nvdr.Request{Fingerprint: "pinned_game", App: "game.exe", Profile: "Some Game"},
+			req:      nvdr.Request{Fingerprint: "pinned_game", Apps: []string{"game.exe"}, Profile: "Some Game"},
 			attempts: []nvdr.LookupAttempt{{Attempt: "Some Game", Status: 0, Profile: "Some Game"}},
 			want:     []string{"pinned profile     : Some Game", "✓", "Some Game"},
 			absent:   []string{"unresolved"},
+		},
+		{
+			name:     "every application string is listed, package family name first",
+			req:      nvdr.Request{Fingerprint: "final_fantasy_vii_rebirth", Apps: []string{"39EA002F.EXED2_n746a19ndrrjg", "ff7rebirth.exe"}},
+			attempts: []nvdr.LookupAttempt{miss},
+			want:     []string{"39EA002F.EXED2_n746a19ndrrjg", "ff7rebirth.exe"},
 		},
 	}
 

@@ -286,7 +286,9 @@ func buildApplication(name string) (*applicationV4, error) {
 	return app, nil
 }
 
-// Apply registers each request's application string in its driver profile.
+// Apply registers each request's application strings in its driver profile.
+// One result is returned per application string registered; a request whose
+// profile cannot be resolved yields a single result naming the fingerprint.
 // Nothing is persisted unless at least one application was added; a save
 // failure therefore aborts the whole batch and reports an error.
 func Apply(reqs []Request) ([]Result, error) {
@@ -299,9 +301,10 @@ func Apply(reqs []Request) ([]Result, error) {
 	results := make([]Result, 0, len(reqs))
 	created := false
 	for _, req := range reqs {
-		result := processRequest(a, session, req)
-		created = created || result.Patched()
-		results = append(results, result)
+		for _, result := range processRequest(a, session, req) {
+			created = created || result.Patched()
+			results = append(results, result)
+		}
 	}
 	if created {
 		if status := a.saveSettings(session); status != statusOK {
@@ -334,41 +337,47 @@ func openSession(initialize bool) (*api, uintptr, error) {
 	return a, session, nil
 }
 
-// processRequest resolves the request's profile, checks whether the application
-// is already registered and, when it is not, adds it to the profile.
-func processRequest(a *api, session uintptr, req Request) Result {
-	if req.App == "" {
-		return newResult(StatusFailed, req, req.Profile, "empty application string")
-	}
+// processRequest resolves the request's profile once and registers every
+// application string in it. A failure on one string is reported on its own and
+// never stops the remaining ones. When the profile cannot be resolved, a single
+// result stands for the whole request.
+func processRequest(a *api, session uintptr, req Request) []Result {
 	handle, profile, res, ok := resolveProfile(a, session, req)
 	if !ok {
-		return res
+		return []Result{res}
 	}
-	present, err := a.appRegistered(session, handle, req.App)
-	if err != nil {
-		return newResult(StatusFailed, req, profile, err.Error())
+	results := make([]Result, 0, len(req.Apps))
+	for _, app := range req.Apps {
+		results = append(results, registerApplication(a, session, handle, profile, req, app))
 	}
-	if present {
-		return newResult(StatusAlreadyPresent, req, profile)
-	}
-	return registerApplication(a, session, handle, profile, req)
+	return results
 }
 
-// registerApplication adds the request's application to the resolved profile,
-// translating the driver answer into a result. A conflict means another
-// profile already owns that process name; anything else is a failure.
-func registerApplication(a *api, session, handle uintptr, profile string, req Request) Result {
-	app, err := buildApplication(req.App)
-	if err != nil {
-		return newResult(StatusFailed, req, profile, err.Error())
+// registerApplication adds one application string to the resolved profile,
+// translating the driver answer into a result. A conflict means another profile
+// already owns that process name; anything else is a failure.
+func registerApplication(a *api, session, handle uintptr, profile string, req Request, app string) Result {
+	if app == "" {
+		return newAppResult(StatusFailed, req, app, profile, "empty application string")
 	}
-	switch status := a.createApplication(session, handle, app); status {
+	present, err := a.appRegistered(session, handle, app)
+	if err != nil {
+		return newAppResult(StatusFailed, req, app, profile, err.Error())
+	}
+	if present {
+		return newAppResult(StatusAlreadyPresent, req, app, profile)
+	}
+	built, err := buildApplication(app)
+	if err != nil {
+		return newAppResult(StatusFailed, req, app, profile, err.Error())
+	}
+	switch status := a.createApplication(session, handle, built); status {
 	case statusOK:
-		return newResult(StatusPatched, req, profile)
+		return newAppResult(StatusPatched, req, app, profile)
 	case statusExecutableAlreadyInUse:
-		return newResult(StatusConflict, req, profile)
+		return newAppResult(StatusConflict, req, app, profile)
 	default:
-		return newResult(StatusFailed, req, profile, a.errorDetail(status))
+		return newAppResult(StatusFailed, req, app, profile, a.errorDetail(status))
 	}
 }
 
@@ -404,9 +413,9 @@ func (a *api) findProfile(session uintptr, req Request) (uintptr, string, Result
 	case statusOK:
 		return handle, req.Profile, Result{}, true
 	case statusProfileNotFound:
-		return 0, req.Profile, newResult(StatusProfileNotFound, req, req.Profile), false
+		return 0, req.Profile, newRequestResult(StatusProfileNotFound, req, req.Profile), false
 	default:
-		return 0, req.Profile, newResult(StatusFailed, req, req.Profile, a.errorDetail(status)), false
+		return 0, req.Profile, newRequestResult(StatusFailed, req, req.Profile, a.errorDetail(status)), false
 	}
 }
 
@@ -421,10 +430,10 @@ func (a *api) findCandidateProfile(session uintptr, req Request) (uintptr, strin
 			}
 			info, infoStatus := a.getProfileInfo(session, handle)
 			if infoStatus != statusOK {
-				return 0, candidate, newResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
+				return 0, candidate, newRequestResult(StatusFailed, req, candidate, a.errorDetail(infoStatus)), false
 			}
 			return handle, fromUTF16(info.profileName[:]), Result{}, true
 		}
 	}
-	return 0, "", newResult(StatusProfileUnresolved, req, ""), false
+	return 0, "", newRequestResult(StatusProfileUnresolved, req, ""), false
 }

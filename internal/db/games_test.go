@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -489,7 +490,7 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 				"fingerprint": "uwp_override",
 				"app_user_model_id": "Pkg_abc!AppX",
 				"versions": ["uwp"],
-				"driver_app": "Other.exe",
+				"driver_app": ["Other.exe"],
 				"driver_profile": "Some Profile"
 			},
 			{
@@ -506,7 +507,7 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 				"fingerprint": "skipped_with_override",
 				"app_user_model_id": "Pkg_skip2!AppX",
 				"versions": ["uwp"],
-				"driver_app": "Ignored.exe",
+				"driver_app": ["Ignored.exe"],
 				"driver_profile": "Ignored Profile",
 				"skip_driver": true
 			}
@@ -517,12 +518,12 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromBytes failed: %v", err)
 	}
-	if got.Games[0].DriverApp != "" || got.Games[0].DriverProfile != "" {
-		t.Errorf("unset driver fields should stay empty, got %q/%q",
-			got.Games[0].DriverApp, got.Games[0].DriverProfile)
+	if got.Games[0].DriverApps != nil || got.Games[0].DriverProfile != "" {
+		t.Errorf("unset driver fields should stay empty, got %v/%q",
+			got.Games[0].DriverApps, got.Games[0].DriverProfile)
 	}
-	if got.Games[1].DriverApp != "Other.exe" {
-		t.Errorf("driver_app = %q, want Other.exe", got.Games[1].DriverApp)
+	if len(got.Games[1].DriverApps) != 1 || got.Games[1].DriverApps[0] != "Other.exe" {
+		t.Errorf("driver_app = %v, want [Other.exe]", got.Games[1].DriverApps)
 	}
 	if got.Games[1].DriverProfile != "Some Profile" {
 		t.Errorf("driver_profile = %q, want Some Profile", got.Games[1].DriverProfile)
@@ -534,19 +535,29 @@ func TestLoadFromBytes_DriverFields(t *testing.T) {
 	tests := []struct {
 		name string
 		game Game
-		want string
+		want []string
 	}{
-		{"package family name by default", *got.Games[0], "Pkg_abc"},
-		{"explicit override wins", *got.Games[1], "Other.exe"},
-		{"no UWP identity and no override", *got.Games[2], ""},
-		{"override without app id", Game{DriverApp: "Solo.exe"}, "Solo.exe"},
-		{"skip_driver suppresses the derived name", *got.Games[3], ""},
-		{"skip_driver beats an explicit driver_app", *got.Games[4], ""},
+		{"package family name by default", *got.Games[0], []string{"Pkg_abc"}},
+		{"override is additive after the package family name", *got.Games[1], []string{"Pkg_abc", "Other.exe"}},
+		{"no UWP identity and no override", *got.Games[2], nil},
+		{"override without app id", Game{DriverApps: []string{"Solo.exe"}}, []string{"Solo.exe"}},
+		{"skip_driver suppresses every string", *got.Games[3], nil},
+		{"skip_driver beats explicit driver_app", *got.Games[4], nil},
+		{"duplicate of the package family name is dropped", Game{AppUserModelID: "Pkg!App", DriverApps: []string{"pkg", "Pkg"}}, []string{"Pkg"}},
+		{"manifest order is preserved after the package family name", Game{AppUserModelID: "Pkg!App", DriverApps: []string{"b.exe", "a.exe"}}, []string{"Pkg", "b.exe", "a.exe"}},
+		// strings.ToLower maps U+0130 (İ) and U+0049/U+0069 (I/i) to the same key
+		// while strings.EqualFold — the comparison the driver itself uses — keeps
+		// them apart. Deduplicating on the lowered form would drop an entry the
+		// driver still needs registered.
+		{"dotted capital I is not a duplicate of i", Game{DriverApps: []string{"\u0130.exe", "i.exe"}}, []string{"\u0130.exe", "i.exe"}},
+		{"dotted capital I does not collide with the package family name", Game{AppUserModelID: "i!App", DriverApps: []string{"\u0130.exe"}}, []string{"i", "\u0130.exe"}},
+		{"ASCII case duplicates are still dropped", Game{DriverApps: []string{"Game.exe", "GAME.EXE"}}, []string{"Game.exe"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if driveApp := tt.game.DriverAppString(); driveApp != tt.want {
-				t.Errorf("DriverAppString() = %q, want %q", driveApp, tt.want)
+			got := tt.game.DriverAppStrings()
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("DriverAppStrings() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -566,10 +577,11 @@ func TestLoadFromBytes_DriverValidation(t *testing.T) {
 		game    string
 		wantErr bool
 	}{
-		{"driver_app at the limit", `{"driver_app":"` + asciiOK + `"}`, false},
-		{"driver_app over the limit", `{"driver_app":"` + tooLong + `"}`, true},
-		{"driver_app surrogate pairs over", `{"driver_app":"` + surrogatePair + `"}`, true},
-		{"driver_app surrogate pairs at the limit", `{"driver_app":"` + surrogateOK + `"}`, false},
+		{"driver_app at the limit", `{"driver_app":["` + asciiOK + `"]}`, false},
+		{"driver_app over the limit", `{"driver_app":["` + tooLong + `"]}`, true},
+		{"driver_app surrogate pairs over", `{"driver_app":["` + surrogatePair + `"]}`, true},
+		{"driver_app surrogate pairs at the limit", `{"driver_app":["` + surrogateOK + `"]}`, false},
+		{"empty driver_app entry", `{"driver_app":["ok.exe",""]}`, true},
 		{"driver_profile over the limit", `{"driver_profile":"` + tooLong + `"}`, true},
 		{"app_user_model_id over the limit", `{"app_user_model_id":"` + tooLong + `"}`, true},
 	}

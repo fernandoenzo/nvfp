@@ -29,11 +29,11 @@ findFingerprintDB ──► dbPath     │
                     │
                     ▼
  driverRequests ──► nvdr.Apply ──► nvapi_QueryInterface
-   (DriverAppString,         │
+   (DriverAppStrings,        │
     DriverProfile,            ├─ DRS_CreateSession / LoadSettings
     DriverProfileCandidates)  ├─ FindProfileByName | FindApplicationByName
                               ├─ EnumApplications (already-present check)
-                              └─ CreateApplication + SaveSettings
+                              └─ CreateApplication (one per string) + SaveSettings
 
 findDAOFingerprintDB ──┐  (--restore)
                        ▼
@@ -79,7 +79,8 @@ gofmt -l .
 - Use standard Go naming and table driven tests with `t.TempDir()`; use `httptest` for HTTP. Tests use the standard `testing` package and the `set` helper from `github.com/fernandoenzo/set` where a set is already in play — no test framework or mocking library.
 - Keep `XmlElement` generic so unknown fingerprint XML survives round-trips. `PatchGame` takes `*FingerprintDB` and `*db.Game`.
 - JSON types: `GameDB.Games []*db.Game`, `db.Game.Versions []string`; save deterministically. Resolve remote → cache → bundled; an empty cache path disables disk caching.
-- `driver_app`, `driver_profile` and `skip_driver` are independent of versions. `DriverAppString()` is the sole registration source; `skip_driver` skips DRS but keeps the XML patch.
+- `driver_app`, `driver_profile` and `skip_driver` are independent of versions. `Game.DriverAppStrings()` is the sole registration source: it returns the package family name derived from `app_user_model_id` first, then the `driver_app` entries in order, deduplicated with `strings.EqualFold`; `skip_driver` returns none while keeping the XML patch. `nvdr.Request.Apps` carries that list and `Apply` emits one `Result` per string, so a conflict or failure on one never stops the rest.
+- Deduplicate application strings with `strings.EqualFold`, never `strings.ToLower`: the driver matches with case folding (`NvAPI_DRS` compares UTF-16 names case-insensitively), and the two disagree on U+0130 (`İ`) with U+0049/U+0069 (`I`/`i`), which `ToLower` collapses although the driver keeps them distinct. The same rule applies to any set of driver-facing strings.
 - UWP addition applies default removals and forced fields; updating an existing version applies only explicit changes. `versions: ["*"]` must stand alone; preserve document order and deterministic overrides.
 - Resolve profiles by exact `driver_profile` or `<DriverProfile>` candidates; never invent profiles. DRS matches process name, not package identity, and ignores `isMetro`. Every candidate is tried through `profileLookupAttempts` (literal, backslashes turned into forward slashes, bare file name, each also lowercased): the fingerprint spells paths with Windows separators while the driver database stores them forward-slashed or without directories, and trying only the literal form silently fails to resolve profiles that exist.
 - NVAPI IDs and struct layouts are pinned with cross-platform tests and compile-time asserts. Driver strings are limited to 2047 UTF-16 units excluding NUL; never truncate.

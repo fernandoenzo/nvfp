@@ -29,7 +29,7 @@ type Game struct {
 	Fingerprint    string            `json:"fingerprint"`
 	AppUserModelID string            `json:"app_user_model_id"`
 	DriverProfile  string            `json:"driver_profile,omitempty"`
-	DriverApp      string            `json:"driver_app,omitempty"`
+	DriverApps     []string          `json:"driver_app,omitempty"`
 	SkipDriver     bool              `json:"skip_driver,omitempty"`
 	Versions       []string          `json:"versions"`
 	Overrides      map[string]string `json:"overrides,omitempty"`
@@ -60,19 +60,37 @@ func (g Game) UWPPackageFamilyName() string {
 	return PackageFamilyName(g.AppUserModelID)
 }
 
-// DriverAppString returns the string registered in the driver profile: DriverApp
-// when set, otherwise the package family name derived from AppUserModelID.
-// Empty when the game has no UWP identity and no explicit override, or when
+// DriverAppStrings returns the application strings to register in the driver
+// profile: the package family name derived from AppUserModelID first (when the
+// game has a UWP identity), then the manifest's DriverApps overrides, in order
+// and with duplicates removed the way the driver compares them. Nil when
 // SkipDriver is set — the manifest's way to opt a game out of the driver step
-// entirely without having to omit its app_user_model_id.
-func (g Game) DriverAppString() string {
+// entirely without having to omit its app_user_model_id — or when there is
+// nothing to register.
+func (g Game) DriverAppStrings() []string {
 	if g.SkipDriver {
-		return ""
+		return nil
 	}
-	if g.DriverApp != "" {
-		return g.DriverApp
+	apps := make([]string, 0, len(g.DriverApps)+1)
+	apps = appendUniqueApp(apps, g.UWPPackageFamilyName())
+	for _, app := range g.DriverApps {
+		apps = appendUniqueApp(apps, app)
 	}
-	return g.UWPPackageFamilyName()
+	return apps
+}
+
+// appendUniqueApp appends app unless the list already holds the same
+// application. The comparison is strings.EqualFold — exactly what NvAPI_DRS
+// uses — and not strings.ToLower: the two disagree on U+0130 (İ) with U+0049 (I)
+// and U+0069 (i), which ToLower collapses into one key although the driver keeps
+// them distinct, silently dropping an entry that has to be registered.
+func appendUniqueApp(apps []string, app string) []string {
+	if app == "" || slices.ContainsFunc(apps, func(existing string) bool {
+		return strings.EqualFold(existing, app)
+	}) {
+		return apps
+	}
+	return append(apps, app)
 }
 
 // VersionKeys returns the requested versions as a set of lowercased, trimmed
@@ -115,7 +133,8 @@ func LoadFromBytes(data []byte) (*GameDB, error) {
 
 // validateGame rejects the manifest entries the patch flow cannot honor: an
 // empty versions list, a wildcard sharing the list, a uwp request without an
-// AppUserModelID, and driver strings the NVAPI fields cannot hold.
+// AppUserModelID, an empty driver_app entry, and driver strings the NVAPI
+// fields cannot hold.
 func validateGame(g *Game) error {
 	if len(g.Versions) == 0 {
 		return fmt.Errorf("game %q has no versions", g.Fingerprint)
@@ -127,15 +146,18 @@ func validateGame(g *Game) error {
 	if keys.Contains(UWP) && g.AppUserModelID == "" {
 		return fmt.Errorf("game %q has %q but doesn't have %q", g.Fingerprint, UWP, "AppUserModelID")
 	}
-	for _, f := range []struct{ name, value string }{
-		{"driver_app", g.DriverApp},
-		{"driver_profile", g.DriverProfile},
-		{"app_user_model_id", g.AppUserModelID},
-	} {
-		if len(utf16.Encode([]rune(f.value))) > MaxDriverString {
-			return fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
-		}
+	if err := validateDriverApps(g); err != nil {
+		return err
 	}
+	if err := validateDriverStrings(g); err != nil {
+		return err
+	}
+	return validateElementNames(g)
+}
+
+// validateElementNames rejects the overrides keys and remove entries XML cannot
+// hold as element names.
+func validateElementNames(g *Game) error {
 	for _, key := range slices.Sorted(maps.Keys(g.Overrides)) {
 		if !ValidElementName(key) {
 			return fmt.Errorf("game %q: overrides key %q is not a valid XML element name", g.Fingerprint, key)
@@ -144,6 +166,34 @@ func validateGame(g *Game) error {
 	for _, name := range g.Remove {
 		if !ValidElementName(name) {
 			return fmt.Errorf("game %q: remove entry %q is not a valid XML element name", g.Fingerprint, name)
+		}
+	}
+	return nil
+}
+
+// validateDriverApps rejects an empty entry and any entry the NVAPI application
+// name cannot hold.
+func validateDriverApps(g *Game) error {
+	for _, app := range g.DriverApps {
+		if app == "" {
+			return fmt.Errorf("game %q: driver_app has an empty entry", g.Fingerprint)
+		}
+		if len(utf16.Encode([]rune(app))) > MaxDriverString {
+			return fmt.Errorf("game %q: driver_app exceeds %d characters", g.Fingerprint, MaxDriverString)
+		}
+	}
+	return nil
+}
+
+// validateDriverStrings rejects the single-string driver fields the NVAPI
+// unicode fields cannot hold.
+func validateDriverStrings(g *Game) error {
+	for _, f := range []struct{ name, value string }{
+		{"driver_profile", g.DriverProfile},
+		{"app_user_model_id", g.AppUserModelID},
+	} {
+		if len(utf16.Encode([]rune(f.value))) > MaxDriverString {
+			return fmt.Errorf("game %q: %s exceeds %d characters", g.Fingerprint, f.name, MaxDriverString)
 		}
 	}
 	return nil

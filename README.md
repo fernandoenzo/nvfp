@@ -198,13 +198,13 @@ Defines which games to patch and how. The program downloads it automatically fro
 | `fingerprint` | string | Exact entry name in `fingerprint.db` (lowercase, underscores) |
 | `app_user_model_id` | string | The UWP app's AppUserModelID: `PackageFamilyName!AppId`. Only needed for `uwp` versions |
 | `driver_profile` | string | Exact profile name in the NVIDIA driver database. Omit to resolve the profile automatically from the fingerprint's `<DriverProfile>` executables |
-| `driver_app` | string | String to register in the driver profile. Defaults to the package family name derived from `app_user_model_id`. Set it to the game's `.exe` when the game launches as a plain executable — see [`app_user_model_id` vs `driver_app`](#app_user_model_id-vs-driver_app-why-both-exist) |
+| `driver_app` | []string | Extra application strings to register in the driver profile, in order. The package family name derived from `app_user_model_id` is always registered first when the game has one; these are **added** after it, never in its place. Set them to the game's `.exe` when the game launches as a plain executable — see [`app_user_model_id` vs `driver_app`](#app_user_model_id-vs-driver_app-why-both-exist) |
 | `skip_driver` | bool | Leave the driver database untouched for this game. The `fingerprint.db` patch still runs; `driver_app` and `driver_profile` are ignored |
 | `versions` | []string | Versions to ensure: `"uwp"` (created if missing) and/or `"steam"`, `"epic"`, etc. (updated if present). `"*"` alone means every version the game already has, plus `uwp` if it can be created |
 | `overrides` | map | XML fields to overwrite or add in the version. Keys must be valid XML element names |
 | `remove` | []string | XML fields to delete from the version. Entries must be valid XML element names |
 
-`driver_app`, `driver_profile` and `app_user_model_id` are limited to 2047 UTF-16 units (the NVAPI limit, measured in code units, not runes); the manifest is rejected otherwise.
+Each `driver_app` entry, `driver_profile` and `app_user_model_id` are limited to 2047 UTF-16 units (the NVAPI limit, measured in code units, not runes); the manifest is rejected otherwise. An empty `driver_app` entry is rejected too.
 
 ### Wildcard: patch every version at once
 
@@ -251,11 +251,11 @@ This:
   "app_user_model_id": "Pkg_abc123!AppGame",
   "versions": ["uwp"],
   "driver_profile": "Some Game",
-  "driver_app": "Custom.exe"
+  "driver_app": ["Custom.exe"]
 }
 ```
 
-This registers `Custom.exe` in the driver profile named `Some Game` instead of the package family name derived from `app_user_model_id`. Both fields are optional; see [Driver profiles](#driver-profiles).
+This registers both `Pkg_abc123` (derived from `app_user_model_id`) and `Custom.exe` in the driver profile named `Some Game`. Both fields are optional; see [Driver profiles](#driver-profiles).
 
 ### Example with the driver step disabled for one game
 
@@ -272,7 +272,7 @@ Some games already work without touching the driver, so there is no reason to ad
 
 `fingerprint.db` is still patched — that is what makes NVIDIA App see the game — but the driver profile is left alone. It is the per-game equivalent of `--no-driver`, and it also keeps the game out of the "driver work pending" count, so no UAC prompt is requested on its behalf.
 
-Note: `"driver_app": ""` does **not** do this. An empty value is indistinguishable from an omitted one, so the package family name would be registered instead — the opposite of what you want. Use `skip_driver`.
+Note: `"driver_app": []` or `[""]` does **not** do this. An empty list is indistinguishable from an omitted one, so the package family name would be registered instead — the opposite of what you want — and an empty entry is rejected outright. Use `skip_driver`.
 
 ### How do I find the `fingerprint` and the `app_user_model_id`?
 
@@ -299,7 +299,7 @@ For each game with `versions: ["uwp"]`:
    - Adds `Distributor: UWP`, `UWPPackageFamilyName`, `AppUserModelId`
    - Applies your overrides and removals
 4. Writes the patched database
-5. Registers the UWP string (package family name by default) in the game's driver profile through NVAPI, unless `--no-driver`
+5. Registers the application strings in the game's driver profile through NVAPI, unless `--no-driver`: the package family name derived from `app_user_model_id` first, then each `driver_app` entry. A failure on one string does not stop the rest.
 
 `--reset-models` is a separate mode: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder).
 
@@ -317,8 +317,8 @@ For each game with `app_user_model_id` (or an explicit `driver_app`), the progra
 1. Resolves the driver profile:
    - `driver_profile` set → looked up by that exact name
    - otherwise → looks up each `<DriverProfile>` executable of the fingerprint (`FF7R.exe`, `FF7R_Epic.exe`…) until one matches a profile. Each candidate is tried in several spellings: as written, with backslashes turned into forward slashes, and as its bare file name, each also lowercased — the fingerprint spells paths with Windows separators (`End\Binaries\Win64\game.exe`) while the driver database stores them forward-slashed (`end/binaries/win64/game.exe`) or without their directory.
-2. Enumerates the profile's applications and skips the game if the string is already there (case-insensitive).
-3. Otherwise adds the string (the package family name, e.g. `39EA002F.EXED1_n746a19ndrrjg`) with `NvAPI_DRS_CreateApplication`, leaving every other field at zero exactly like NvidiaProfileInspectorRevamped does.
+2. Builds the list of strings to register: the package family name derived from `app_user_model_id` (when the game has one), then every `driver_app` entry in order, with duplicates removed using the same case folding the driver applies (`strings.EqualFold`).
+3. For each string, enumerates the profile's applications and skips it if it is already there (case-insensitive). Otherwise adds it (e.g. `39EA002F.EXED1_n746a19ndrrjg`, then `ff7rebirth.exe`) with `NvAPI_DRS_CreateApplication`, leaving every other field at zero exactly like NvidiaProfileInspectorRevamped does. A string that conflicts with another profile or fails to register is reported on its own; the remaining strings are still attempted.
 4. Saves the database once per run, only if something was added.
 
 No profile is ever **created**: when no candidate matches, the game is reported as unresolved and the output asks you to set `driver_profile` in the manifest with the exact name shown by NVIDIA Control Panel or NvidiaProfileInspectorRevamped. Creating ad-hoc profiles would pollute the driver database and could shadow NVIDIA's own profile for the game.
@@ -331,10 +331,12 @@ The step is idempotent: running the tool again reports `⊘ already in driver pr
 
 | How the game runs | Name the driver sees | What to register |
 |---|---|---|
-| Hosted Store app (`ApplicationFrameHost`/`WWAHost` keeps the package identity) | the **package family name** | the default: omit `driver_app` |
-| Plain executable, even if bought in the Store | the **`.exe`** name | set `driver_app` to that `.exe` |
+| Hosted Store app (`ApplicationFrameHost`/`WWAHost` keeps the package identity) | the **package family name** | nothing extra: the default already registers it |
+| Plain executable, even if bought in the Store | the **`.exe`** name | add that `.exe` to `driver_app` |
 
-Two entries of the same saga can land on opposite sides: Remake applies its profile with the package family name (`"versions": ["uwp"]`, no `driver_app`), while Rebirth only applies it with `"driver_app": "ff7rebirth.exe"` and silently does nothing with the UWP ID. Both are correct — the games just launch differently. `app_user_model_id` is still needed on both: it is what patches `fingerprint.db`.
+Both are registered when both apply. `app_user_model_id` contributes the package family name, which `nvfp` always registers first; `driver_app` **adds** the executable names after it and never replaces it. A game whose entry appears twice in the driver database is normal, not a bug: the driver picks whichever string matches the process that actually started.
+
+Two entries of the same saga land on different sides of the table. Remake applies its profile with the package family name alone (`"versions": ["uwp"]`, no `driver_app`), while Rebirth is launched as a plain executable, so it needs `"driver_app": ["ff7rebirth.exe"]` in addition to the package family name. `app_user_model_id` is still needed on both: it is what patches `fingerprint.db`.
 
 The `isMetro` flag, which sounds like it should declare "this is a Store app", is **ignored by the driver**: it reads back as 0 whatever you pass, so `nvfp` leaves it at 0 and the string is the only lever available.
 
@@ -346,7 +348,7 @@ Look at the running process while the game is at its main menu, from an unprivil
 Get-Process | Where-Object Name -like 'ff7*' | Format-Table Id, Name, Path -Auto
 ```
 
-Read the `Name` column: the game's `.exe` (e.g. `ff7rebirth.exe`) → set `driver_app` to it; an app host (`ApplicationFrameHost`, `WWAHost`, `GameBar`) → the game is hosted and the package family name is right, leave `driver_app` unset. NvidiaProfileInspectorRevamped shows which registered string actually makes the profile apply: the one matching that process name.
+Read the `Name` column: the game's `.exe` (e.g. `ff7rebirth.exe`) → add it to `driver_app`; an app host (`ApplicationFrameHost`, `WWAHost`, `GameBar`) → the game is hosted and the package family name is enough, leave `driver_app` out. NvidiaProfileInspectorRevamped shows which registered string actually makes the profile apply: the one matching that process name. If unsure, list both — an unused extra entry is harmless.
 
 ### Diagnosing profile resolution without writing anything
 
@@ -358,6 +360,7 @@ Read the `Name` column: the game's `.exe` (e.g. `ff7rebirth.exe`) → set `drive
 Driver profile resolution (read-only, nothing is written):
 
 final_fantasy_vii_rebirth
+  application string : 39EA002F.EXED2_n746a19ndrrjg
   application string : ff7rebirth.exe
   candidates         :
       ✓ end/binaries/win64/ff7rebirth_.exe          matched profile "FINAL FANTASY VII REBIRTH"

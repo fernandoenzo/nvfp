@@ -52,7 +52,9 @@ func loadFingerprintForDoctor() *nvidia.FingerprintDB {
 // resolved by name, so its report is a single lookup, not a candidate list.
 func reportRequest(req nvdr.Request, attempts []nvdr.LookupAttempt) {
 	fmt.Printf("\n%s\n", req.Fingerprint)
-	fmt.Printf("  application string : %s\n", req.App)
+	for _, app := range req.Apps {
+		fmt.Printf("  application string : %s\n", app)
+	}
 	if req.Profile != "" {
 		fmt.Printf("  pinned profile     : %s\n", req.Profile)
 		if !printAttempts(attempts) {

@@ -4,7 +4,7 @@ const (
 	// version is the release this binary was built from.
 	version = "1.3.0"
 	// versionDate is the release date shown by --version.
-	versionDate = "2026 Oct 12"
+	versionDate = "2026 Oct 13"
 )
 
 const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +

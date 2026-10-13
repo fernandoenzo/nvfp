@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/fernandoenzo/nvfp/internal/db"
@@ -25,7 +26,7 @@ func TestHasDriverWork(t *testing.T) {
 		{
 			name: "explicit driver_app without app id",
 			games: []*db.Game{
-				{Fingerprint: "exe_game", DriverApp: "Game.exe", Versions: []string{"steam"}},
+				{Fingerprint: "exe_game", DriverApps: []string{"Game.exe"}, Versions: []string{"steam"}},
 			},
 			want: true,
 		},
@@ -66,7 +67,7 @@ func TestDriverRequests(t *testing.T) {
 		Version: 1,
 		Games: []*db.Game{
 			{Fingerprint: "final_fantasy_vii_remake", AppUserModelID: "39EA002F.EXED1_n746a19ndrrjg!AppFINALFANTASYVIIREMAKEShipping", Versions: []string{"uwp"}},
-			{Fingerprint: "already_uwp_game", DriverApp: "Override.exe", DriverProfile: "The Profile", Versions: []string{"steam"}},
+			{Fingerprint: "already_uwp_game", DriverApps: []string{"Override.exe"}, DriverProfile: "The Profile", Versions: []string{"steam"}},
 			{Fingerprint: "plain_steam_game", Versions: []string{"steam"}},
 			{Fingerprint: "missing_from_fingerprint_db", AppUserModelID: "Pkg!App", Versions: []string{"uwp"}},
 			{Fingerprint: "skipped_driver_game", AppUserModelID: "Pkg_skip!App", SkipDriver: true, Versions: []string{"uwp"}},
@@ -82,8 +83,8 @@ func TestDriverRequests(t *testing.T) {
 		t.Fatalf("driverRequests() returned %d requests, want 3: %+v", len(reqs), reqs)
 	}
 
-	if reqs[0].App != "39EA002F.EXED1_n746a19ndrrjg" {
-		t.Errorf("reqs[0].App = %q, want the package family name", reqs[0].App)
+	if len(reqs[0].Apps) != 1 || reqs[0].Apps[0] != "39EA002F.EXED1_n746a19ndrrjg" {
+		t.Errorf("reqs[0].Apps = %v, want the package family name", reqs[0].Apps)
 	}
 	if reqs[0].Profile != "" {
 		t.Errorf("reqs[0].Profile = %q, want empty (automatic resolution)", reqs[0].Profile)
@@ -98,8 +99,8 @@ func TestDriverRequests(t *testing.T) {
 		}
 	}
 
-	if reqs[1].App != "Override.exe" {
-		t.Errorf("reqs[1].App = %q, want Override.exe", reqs[1].App)
+	if len(reqs[1].Apps) != 1 || reqs[1].Apps[0] != "Override.exe" {
+		t.Errorf("reqs[1].Apps = %v, want Override.exe", reqs[1].Apps)
 	}
 	if reqs[1].Profile != "The Profile" {
 		t.Errorf("reqs[1].Profile = %q, want The Profile", reqs[1].Profile)
@@ -128,6 +129,37 @@ func TestDriverRequests(t *testing.T) {
 	gameFilter = "final_fantasy_vii_remake"
 	if got := driverRequests(gameDB, fdb); len(got) != 1 || got[0].Fingerprint != "final_fantasy_vii_remake" {
 		t.Errorf("driverRequests() with --game final_fantasy_vii_remake = %+v, want one", got)
+	}
+}
+
+// A UWP game with a driver_app override must yield one request carrying both
+// strings, package family name first: the override adds to the package family
+// name instead of replacing it.
+func TestDriverRequestsAppendsOverrideToPackageFamilyName(t *testing.T) {
+	fdb := newTestFingerprintDB(t)
+	gameDB := &db.GameDB{
+		Version: 1,
+		Games: []*db.Game{
+			{
+				Fingerprint:    "final_fantasy_vii_rebirth",
+				AppUserModelID: "39EA002F.EXED2_n746a19ndrrjg!AppFINALFANTASYVIIREBIRTHShipping",
+				DriverApps:     []string{"ff7rebirth.exe"},
+				Versions:       []string{"uwp"},
+			},
+		},
+	}
+
+	oldFilter := gameFilter
+	defer func() { gameFilter = oldFilter }()
+	gameFilter = ""
+
+	reqs := driverRequests(gameDB, fdb)
+	if len(reqs) != 1 {
+		t.Fatalf("driverRequests() returned %d requests, want 1: %+v", len(reqs), reqs)
+	}
+	want := []string{"39EA002F.EXED2_n746a19ndrrjg", "ff7rebirth.exe"}
+	if !slices.Equal(reqs[0].Apps, want) {
+		t.Errorf("reqs[0].Apps = %v, want %v", reqs[0].Apps, want)
 	}
 }
 

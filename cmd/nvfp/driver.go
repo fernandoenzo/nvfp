@@ -19,15 +19,16 @@ func hasDriverWork(gameDB *db.GameDB) bool {
 		return false
 	}
 	for _, game := range games {
-		if game.DriverAppString() != "" {
+		if len(game.DriverAppStrings()) > 0 {
 			return true
 		}
 	}
 	return false
 }
 
-// driverRequests builds one request per selected game that has a string to
-// register, with the fingerprint's executables as automatic-resolution hints.
+// driverRequests builds one request per selected game that has an application
+// string to register, with the fingerprint's executables as automatic-resolution
+// hints. The package family name comes first, followed by the driver_app entries.
 func driverRequests(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) []nvdr.Request {
 	games, err := filterGames(gameDB)
 	if err != nil {
@@ -35,12 +36,12 @@ func driverRequests(gameDB *db.GameDB, fdb *nvidia.FingerprintDB) []nvdr.Request
 	}
 	var reqs []nvdr.Request
 	for _, game := range games {
-		app := game.DriverAppString()
-		if app == "" {
+		apps := game.DriverAppStrings()
+		if len(apps) == 0 {
 			continue
 		}
 		req := nvdr.Request{
-			App:         app,
+			Apps:        apps,
 			Profile:     game.DriverProfile,
 			Fingerprint: game.Fingerprint,
 		}
@@ -91,11 +92,13 @@ func runDriverStep(reqs []nvdr.Request) error {
 func printDriverPlan(reqs []nvdr.Request) {
 	fmt.Println("Driver profiles:")
 	for _, req := range reqs {
-		if req.Profile == "" {
-			fmt.Printf("  → would register %s in driver profile for %q (auto)\n", req.App, req.Fingerprint)
-			continue
+		for _, app := range req.Apps {
+			if req.Profile == "" {
+				fmt.Printf("  → would register %s in driver profile for %q (auto)\n", app, req.Fingerprint)
+				continue
+			}
+			fmt.Printf("  → would register %s in driver profile %q\n", app, req.Profile)
 		}
-		fmt.Printf("  → would register %s in driver profile %q\n", req.App, req.Profile)
 	}
 }
 

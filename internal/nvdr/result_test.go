@@ -2,13 +2,14 @@ package nvdr
 
 import "testing"
 
-func TestNewResultMessages(t *testing.T) {
+func TestNewAppResultMessages(t *testing.T) {
 	req := Request{
 		Fingerprint: "final_fantasy_vii_remake",
-		App:         "39EA002F.EXED1_n746a19ndrrjg",
+		Apps:        []string{"39EA002F.EXED1_n746a19ndrrjg", "ff7remake.exe"},
 		Profile:     "FF7R Profile",
 		Candidates:  []string{"FF7R.exe", "FF7R_Epic.exe"},
 	}
+	app := "39EA002F.EXED1_n746a19ndrrjg"
 
 	tests := []struct {
 		name    string
@@ -30,17 +31,6 @@ func TestNewResultMessages(t *testing.T) {
 			want:    `39EA002F.EXED1_n746a19ndrrjg already in driver profile "FF7R Profile"`,
 		},
 		{
-			name:    "profile not found",
-			status:  StatusProfileNotFound,
-			profile: "FF7R Profile",
-			want:    `driver profile "FF7R Profile" not found`,
-		},
-		{
-			name:   "profile unresolved lists candidates",
-			status: StatusProfileUnresolved,
-			want:   `no driver profile found for "final_fantasy_vii_remake" (tried: FF7R.exe, FF7R_Epic.exe); set "driver_profile" in games.json`,
-		},
-		{
 			name:    "conflict",
 			status:  StatusConflict,
 			profile: "Other Profile",
@@ -56,11 +46,11 @@ func TestNewResultMessages(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := newResult(tt.status, req, tt.profile, tt.detail)
+			got := newAppResult(tt.status, req, app, tt.profile, tt.detail)
 			if got.Message != tt.want {
 				t.Errorf("message = %q, want %q", got.Message, tt.want)
 			}
-			if got.Fingerprint != req.Fingerprint || got.App != req.App {
+			if got.Fingerprint != req.Fingerprint || got.App != app {
 				t.Errorf("result lost request identity: %+v", got)
 			}
 			if got.Profile != tt.profile {
@@ -71,9 +61,62 @@ func TestNewResultMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewRequestResultMessages(t *testing.T) {
+	req := Request{
+		Fingerprint: "final_fantasy_vii_remake",
+		Apps:        []string{"39EA002F.EXED1_n746a19ndrrjg", "ff7remake.exe"},
+		Profile:     "FF7R Profile",
+		Candidates:  []string{"FF7R.exe", "FF7R_Epic.exe"},
+	}
+
+	tests := []struct {
+		name    string
+		status  Status
+		profile string
+		detail  string
+		want    string
+	}{
+		{
+			name:    "profile not found",
+			status:  StatusProfileNotFound,
+			profile: "FF7R Profile",
+			want:    `driver profile "FF7R Profile" not found`,
+		},
+		{
+			name:   "profile unresolved lists candidates",
+			status: StatusProfileUnresolved,
+			want:   `no driver profile found for "final_fantasy_vii_remake" (tried: FF7R.exe, FF7R_Epic.exe); set "driver_profile" in games.json`,
+		},
+		{
+			name:    "lookup failed with detail",
+			status:  StatusFailed,
+			profile: "FF7R Profile",
+			detail:  "administrator privileges required",
+			want:    `driver profile "FF7R Profile" lookup failed: administrator privileges required`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newRequestResult(tt.status, req, tt.profile, tt.detail)
+			if got.Message != tt.want {
+				t.Errorf("message = %q, want %q", got.Message, tt.want)
+			}
+			if got.Fingerprint != req.Fingerprint {
+				t.Errorf("result lost request identity: %+v", got)
+			}
+			if got.App != "" {
+				t.Errorf("request-level result should carry no application string, got %q", got.App)
+			}
+			if got.Patched() {
+				t.Error("a request-level result is never patched")
+			}
+		})
+	}
 
 	t.Run("unresolved without candidates omits the tried list", func(t *testing.T) {
-		got := newResult(StatusProfileUnresolved, Request{Fingerprint: "lonely_game"}, "")
+		got := newRequestResult(StatusProfileUnresolved, Request{Fingerprint: "lonely_game"}, "")
 		want := `no driver profile found for "lonely_game"; set "driver_profile" in games.json`
 		if got.Message != want {
 			t.Errorf("message = %q, want %q", got.Message, want)

@@ -23,8 +23,8 @@ func printGameEntry(game *db.Game) {
 	fmt.Printf("    UWPPackageFamilyName: %s\n", game.UWPPackageFamilyName())
 	if game.SkipDriver {
 		fmt.Println("    SkipDriver: true")
-	} else if app := game.DriverAppString(); app != "" {
-		fmt.Printf("    DriverApp: %s\n", app)
+	} else if apps := game.DriverAppStrings(); len(apps) > 0 {
+		fmt.Printf("    DriverApps: %v\n", apps)
 	}
 	if game.DriverProfile != "" {
 		fmt.Printf("    DriverProfile: %s\n", game.DriverProfile)

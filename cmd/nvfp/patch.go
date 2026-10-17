@@ -78,17 +78,24 @@ func patchDB(gameDB *db.GameDB, dbPath string) (*nvidia.FingerprintDB, bool, err
 }
 
 // filterGames returns the games list, optionally filtered by --game flag.
-// A non-empty filter that matches nothing is an error, not a silent success.
+// A fingerprint may appear more than once (a later entry refines an earlier
+// one for a specific store), so the filter returns every matching entry in
+// manifest order. A non-empty filter that matches nothing is an error, not a
+// silent success.
 func filterGames(gameDB *db.GameDB) ([]*db.Game, error) {
 	if gameFilter == "" {
 		return gameDB.Games, nil
 	}
+	var games []*db.Game
 	for _, g := range gameDB.Games {
 		if g.Fingerprint == gameFilter {
-			return []*db.Game{g}, nil
+			games = append(games, g)
 		}
 	}
-	return nil, fmt.Errorf("game %q not found in games database", gameFilter)
+	if len(games) == 0 {
+		return nil, fmt.Errorf("game %q not found in games database", gameFilter)
+	}
+	return games, nil
 }
 
 // applyPatches patches all games and returns whether any were modified.

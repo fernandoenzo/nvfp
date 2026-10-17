@@ -68,6 +68,13 @@
       "overrides": {
         "DLSS_Override_No_OPS": "0"
       }
+    },
+    {
+      "fingerprint": "the_witcher_3",
+      "versions": ["gog"],
+      "overrides": {
+        "Launch": "cd bin\\x64_dx12 && witcher3.exe"
+      }
     }
   ]
 }

@@ -224,6 +224,43 @@ overrides/removals, and creates a `uwp` version when `app_user_model_id` is set
 and the fingerprint doesn't have one yet. `"*"` must be the only entry in
 `versions`; the manifest is rejected otherwise.
 
+### One fingerprint, several entries
+
+A fingerprint may appear in more than one entry. They are applied **in manifest
+order**, each on top of the previous result, so a later entry can refine a
+single store while an earlier wildcard one covers the rest:
+
+```json
+{
+  "fingerprint": "the_witcher_3",
+  "app_user_model_id": "CDPROJEKTSA.Witcher3GOTY_0xkrdv0gjmk28!bin.Gaming.Desktop.x64.witcher3",
+  "versions": ["*"],
+  "overrides": {
+    "DLSS_Override_No_OPS": "0"
+  }
+},
+{
+  "fingerprint": "the_witcher_3",
+  "versions": ["gog"],
+  "overrides": {
+    "Launch": "cd bin\\x64_dx12 && witcher3.exe"
+  }
+}
+```
+
+The wildcard entry patches every version; the `gog` entry then runs after it and
+overrides only the GOG version's `Launch`. `--game the_witcher_3` selects both
+entries, so a filtered run behaves exactly like the full one for that
+fingerprint.
+
+**`Launch` carries its own working directory.** The launcher runs the `Launch`
+string with the working directory set to the game's install **root**, so a bare
+relative path would start the executable from the wrong place. NVIDIA's own
+entries express this as `cd <dir> && <exe>`; keep that shape when you override
+`Launch`, and point `<dir>` at the folder that actually holds the executable
+(the GOG GOTY build ships `bin\x64_dx12`, not the `bin\x64` NVIDIA's original
+entry names).
+
 ### Example with overrides and removals
 
 ```json

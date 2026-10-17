@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,6 +53,34 @@ func TestFilterGames_NotFound(t *testing.T) {
 	_, err := filterGames(gameDB)
 	if err == nil {
 		t.Error("filterGames() expected error for nonexistent game, got nil")
+	}
+}
+
+func TestFilterGames_ReturnsEveryEntryForFingerprint(t *testing.T) {
+	// A fingerprint may carry several manifest entries (a wildcard one plus a
+	// later, store-scoped refinement). The filter must return all of them in
+	// manifest order, not just the first.
+	gameDB := &db.GameDB{
+		Version: 1,
+		Games: []*db.Game{
+			{Fingerprint: "the_witcher_3", Versions: []string{"*"}},
+			{Fingerprint: "other_game", Versions: []string{"uwp"}, AppUserModelID: "P!A"},
+			{Fingerprint: "the_witcher_3", Versions: []string{"gog"}, Overrides: map[string]string{"Launch": `cd bin\x64_dx12 && witcher3.exe`}},
+		},
+	}
+	original := gameFilter
+	gameFilter = "the_witcher_3"
+	defer func() { gameFilter = original }()
+
+	games, err := filterGames(gameDB)
+	if err != nil {
+		t.Fatalf("filterGames() error: %v", err)
+	}
+	if len(games) != 2 {
+		t.Fatalf("filterGames() returned %d entries, want 2", len(games))
+	}
+	if slices.Contains(games[1].Versions, "*") || !slices.Contains(games[1].Versions, "gog") {
+		t.Errorf("entries are out of manifest order: %v", games[1].Versions)
 	}
 }
 

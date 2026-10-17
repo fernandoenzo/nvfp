@@ -1238,6 +1238,97 @@ func TestPatchGame_Wildcard_OrderIndependentOfMapIteration(t *testing.T) {
 	}
 }
 
+func TestPatchGame_SecondEntryOverridesOnlyTargetedVersion(t *testing.T) {
+	// Two manifest entries may name the same fingerprint: an earlier wildcard
+	// entry and a later one scoped to a single store. The later entry must
+	// refine the version it selects and leave the others as the first left them.
+	//
+	// The gog version mirrors NVIDIA's own entry for The Witcher 3: the store's
+	// executables live under bin\x64_dx12, but the Launch string still points at
+	// the pre-remaster bin\x64 directory. A Launch string is run after the
+	// working directory is set to the install root, so it must carry its own
+	// "cd <dir> && exe" — a bare relative path would run the game from the
+	// wrong directory.
+	fp := parseInlineFingerprint(t, `<?xml version="1.0" encoding="UTF-8"?>
+<FingerprintDB>
+  <Fingerprint name="the_witcher_3">
+    <Version name="steam">
+      <DriverProfile>bin\x64_dx12\witcher3.exe</DriverProfile>
+      <Distributor>Steam</Distributor>
+      <Launch>start steam://rungameid/292030</Launch>
+    </Version>
+    <Version name="gog">
+      <DriverProfile>bin\x64_dx12\witcher3.exe</DriverProfile>
+      <Distributor>gog</Distributor>
+      <Launch>cd bin\x64 &amp;&amp; witcher3.exe</Launch>
+    </Version>
+  </Fingerprint>
+</FingerprintDB>`)
+
+	first := PatchGame(fp, &gamesdb.Game{
+		Fingerprint: "the_witcher_3",
+		Versions:    []string{"*"},
+		Overrides:   map[string]string{"DLSS_Override_No_OPS": "0"},
+	})
+	if first.Status != StatusPatched {
+		t.Fatalf("first status = %q, want %q (%s)", first.Status, StatusPatched, first.Message)
+	}
+
+	second := PatchGame(fp, &gamesdb.Game{
+		Fingerprint: "the_witcher_3",
+		Versions:    []string{"gog"},
+		Overrides:   map[string]string{"Launch": `cd bin\x64_dx12 && witcher3.exe`},
+	})
+	if second.Status != StatusPatched {
+		t.Fatalf("second status = %q, want %q (%s)", second.Status, StatusPatched, second.Message)
+	}
+
+	witcher := FindFingerprint(fp, "the_witcher_3")
+	if got := elementContent(findVersion(witcher, "gog"), "Launch"); got != `cd bin\x64_dx12 && witcher3.exe` {
+		t.Errorf("gog Launch = %q, want the gog override with its working directory", got)
+	}
+	if got := elementContent(findVersion(witcher, "steam"), "Launch"); got != `start steam://rungameid/292030` {
+		t.Errorf("steam Launch = %q, want it untouched by the gog-scoped entry", got)
+	}
+
+	// The scoped entry is idempotent: a second run changes nothing.
+	if again := PatchGame(fp, &gamesdb.Game{
+		Fingerprint: "the_witcher_3",
+		Versions:    []string{"gog"},
+		Overrides:   map[string]string{"Launch": `cd bin\x64_dx12 && witcher3.exe`},
+	}); again.Status != StatusAlreadyPresent {
+		t.Errorf("re-run status = %q, want %q", again.Status, StatusAlreadyPresent)
+	}
+}
+
+// elementContent returns the content of the first element with the given
+// (case-insensitive) name, or "" when the version or element is absent.
+func elementContent(v *Version, name string) string {
+	if v == nil {
+		return ""
+	}
+	for _, e := range v.Elements {
+		if strings.EqualFold(e.ElementName(), name) {
+			return e.Content
+		}
+	}
+	return ""
+}
+
+// parseInlineFingerprint parses an XML document from a temporary file.
+func parseInlineFingerprint(t *testing.T, doc string) *FingerprintDB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fingerprint.db")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatalf("writing inline fingerprint.db: %v", err)
+	}
+	db, err := ParseFingerprintDB(path)
+	if err != nil {
+		t.Fatalf("ParseFingerprintDB failed: %v", err)
+	}
+	return db
+}
+
 // versionNames returns the version names of a fingerprint in document order.
 func versionNames(fp *Fingerprint) []string {
 	names := make([]string, 0, len(fp.Versions))

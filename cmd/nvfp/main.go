@@ -16,6 +16,8 @@ var (
 	elevatedFlag    bool
 	doctorFlag      bool
 	resetModelsFlag bool
+	dlssDebugFlag   bool
+	noDLSSDebugFlag bool
 	gameFilter      string
 	gamesJSONPath   string
 )
@@ -47,6 +49,8 @@ func registerFlags(rootCmd *cobra.Command) {
 	rootCmd.Flags().MarkHidden("elevated")
 	rootCmd.Flags().BoolVar(&doctorFlag, "doctor", false, "Report how each driver profile would resolve, without writing anything")
 	rootCmd.Flags().BoolVar(&resetModelsFlag, "reset-models", false, "Delete the NVIDIA NGX models folder; NVIDIA rebuilds it at the next session")
+	rootCmd.Flags().BoolVar(&dlssDebugFlag, "dlss-debug", false, "Turn on the DLSS debug indicator: sets ShowDlssIndicator = 1024 under HKLM NGXCore")
+	rootCmd.Flags().BoolVar(&noDLSSDebugFlag, "no-dlss-debug", false, "Turn off the DLSS debug indicator: sets ShowDlssIndicator = 0 under HKLM NGXCore")
 }
 
 // markExclusive declares the flag combinations that cannot be combined.
@@ -57,13 +61,20 @@ func markExclusive(rootCmd *cobra.Command) {
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "restore")
 	rootCmd.MarkFlagsMutuallyExclusive("doctor", "no-driver")
 	rootCmd.MarkFlagsMutuallyExclusive("list", "doctor")
-	for _, other := range []string{"list", "restore", "doctor", "reset-models"} {
+	for _, other := range []string{"list", "restore", "doctor", "reset-models", "dlss-debug", "no-dlss-debug"} {
 		rootCmd.MarkFlagsMutuallyExclusive("version", other)
 	}
 	// The models reset works on the NGX cache, never the games manifest: it is
 	// incompatible with every manifest-related flag.
 	for _, other := range []string{"restore", "list", "doctor", "game", "games-json", "no-driver"} {
 		rootCmd.MarkFlagsMutuallyExclusive("reset-models", other)
+	}
+	// The DLSS indicator writes one registry value: like the models reset, it
+	// is incompatible with every manifest-related mode.
+	rootCmd.MarkFlagsMutuallyExclusive("dlss-debug", "no-dlss-debug")
+	for _, other := range []string{"restore", "list", "doctor", "reset-models", "game", "games-json", "no-driver"} {
+		rootCmd.MarkFlagsMutuallyExclusive("dlss-debug", other)
+		rootCmd.MarkFlagsMutuallyExclusive("no-dlss-debug", other)
 	}
 }
 
@@ -73,17 +84,26 @@ func main() {
 	}
 }
 
-func run(cmd *cobra.Command, args []string) error {
-	// Version, restore and the models reset are local operations: they must not
-	// depend on the manifest, the cache, or the network.
+// runLocalOp runs the local-only modes, which must not depend on the manifest,
+// the cache or the network. done reports whether one of them handled the run.
+func runLocalOp(cmd *cobra.Command) (done bool, err error) {
 	switch {
 	case versionFlag:
 		fmt.Fprint(cmd.OutOrStdout(), versionMessage)
-		return nil
+		return true, nil
 	case restoreFlag:
-		return restoreDB()
+		return true, restoreDB()
 	case resetModelsFlag:
-		return runResetModels(nvidiaModelsDir)
+		return true, runResetModels(nvidiaModelsDir)
+	case dlssDebugFlag || noDLSSDebugFlag:
+		return true, runSetDLSSDebug(dlssDebugFlag)
+	}
+	return false, nil
+}
+
+func run(cmd *cobra.Command, args []string) error {
+	if done, err := runLocalOp(cmd); done {
+		return err
 	}
 	gameDB, err := resolveGames()
 	if err != nil {

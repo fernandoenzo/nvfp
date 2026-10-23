@@ -20,7 +20,7 @@ NVIDIA App's XML database often omits UWP games. Adding an entry makes the app r
 
 - Windows 11
 - **NVIDIA App** installed (the modern one, not GeForce Experience)
-- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched. The `--reset-models` step also needs them, because `ProgramData\NVIDIA` is not writable by a normal user.
+- **Administrator privileges** for the driver-profile step — the program asks for them through the UAC prompt. Decline it (or pass `--no-driver`) and only `fingerprint.db` is patched. The `--reset-models` step also needs them, because `ProgramData\NVIDIA` is not writable by a normal user, and so do `--dlss-debug`/`--no-dlss-debug`, which write under `HKLM`.
 - **Windows Terminal** or **PowerShell 7** — do not use CMD. The program prints Unicode symbols (✓ ⊘ ✗) that CMD can't render.
 
 ## Usage
@@ -109,6 +109,47 @@ the `dlss`-family folders inside `models` are created only when a DLSS game
 runs for the first time after the reset, so DLSS titles find no payloads until
 then.
 
+### Toggle the DLSS debug indicator
+
+```powershell
+.\nvfp.exe --dlss-debug
+.\nvfp.exe --no-dlss-debug
+```
+
+Sets `ShowDlssIndicator` (a `REG_DWORD`) under
+`HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore`: `1024` turns the DLSS debug
+overlay on, `0` turns it off.
+
+```
+Set ShowDlssIndicator = 1024 (DLSS debug indicator on)
+Note: restart any running game for the indicator to appear; the driver reads it when the game initialises DLSS.
+```
+
+The **value** never exists before the first run — the driver reads a missing
+`ShowDlssIndicator` as off — so `nvfp` creates it. The `NGXCore` **key** is a
+different matter: it may also be missing on a machine that never used NGX, and
+`nvfp` creates that leaf too. What it never creates is the tree above it:
+`SOFTWARE\NVIDIA Corporation\Global` belongs to the NVIDIA installer, so a
+missing parent stops the run with `HKLM\SOFTWARE\NVIDIA Corporation\Global does
+not exist: is the NVIDIA driver or the NVIDIA App installed?` instead of leaving
+a fabricated NVIDIA tree behind. The rule is not which level of the tree it is,
+but whether anything will read the value: without that parent there is no
+NVIDIA software on the machine, so the write would succeed where no driver will
+ever look. A missing `NGXCore` leaf under an existing parent is a different
+case — the driver is there and will read the value as soon as a DLSS game
+starts — so the leaf is created.
+
+A value already holding the requested state prints `Nothing to do` and is not
+rewritten. `--dry-run` prints `Would set ShowDlssIndicator = <value>` without
+requesting elevation or touching the registry.
+
+The step needs administrator privileges (HKLM), so it raises the UAC prompt;
+`--elevated` is added by the relaunch and never typed. A value that exists with
+another type is refused rather than overwritten, because rewriting it as a
+DWORD would destroy it. Both flags are incompatible with each other and with
+`--restore`, `--list`, `--doctor`, `--reset-models`, `--game`, `--games-json`,
+`--no-driver` and `--version`; combine them with `--dry-run` to preview.
+
 ### Skip the driver step
 
 ```powershell
@@ -162,7 +203,7 @@ Copies NVIDIA App's own pristine copy (kept under `NvBackend\DAO\<hash>\`) over 
 
 `--restore` only restores `fingerprint.db`: the entries added to the driver profile database are **not** removed. They are additive, and NVIDIA may legitimately publish the same entries again through an OTA profile update. To remove a driver-profile entry, use NVIDIA Control Panel (Manage 3D settings) or NvidiaProfileInspectorRevamped, which expose the full DRS editing UI.
 
-`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor`, `--reset-models` or `--version`. Combine it with `--dry-run` to preview the copy.
+`--restore` is a local file operation: it ignores the manifest, cache and network, so it works offline. It cannot be combined with `--list`, `--game`, `--games-json`, `--doctor`, `--reset-models`, `--dlss-debug`, `--no-dlss-debug` or `--version`. Combine it with `--dry-run` to preview the copy.
 
 ### Print the version
 
@@ -338,7 +379,7 @@ For each game with `versions: ["uwp"]`:
 4. Writes the patched database
 5. Registers the application strings in the game's driver profile through NVAPI, unless `--no-driver`: the package family name derived from `app_user_model_id` first, then each `driver_app` entry. A failure on one string does not stop the rest.
 
-`--reset-models` is a separate mode: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder).
+`--reset-models` is a separate mode: it only deletes the NGX models folder, as described in [Reset the NVIDIA NGX models folder](#reset-the-nvidia-ngx-models-folder). `--dlss-debug` and `--no-dlss-debug` are separate modes too: they only write the indicator DWORD, as described in [Toggle the DLSS debug indicator](#toggle-the-dlss-debug-indicator).
 
 The patched games become visible only after a Windows logoff/logon (no reboot needed): the ontology is rebuilt at session start. The program prints that reminder whenever it modifies the database.
 
@@ -434,7 +475,7 @@ Run the tool again and the profile is found by name. If the game genuinely has n
 
 ### Elevation
 
-The program checks its own token before touching anything. Unelevated, and with driver work pending (`--reset-models` requests it too, when the folder exists), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
+The program checks its own token before touching anything. Unelevated, and with driver work pending (`--reset-models` requests it too, when the folder exists, and so do `--dlss-debug`/`--no-dlss-debug`), it relaunches itself through `ShellExecuteExW`/`runas` with the same arguments plus an internal `--elevated` flag, waits for it and propagates its exit code. `shell32.dll` is resolved from `System32` only (`windows.NewLazySystemDLL`), so the search order cannot be hijacked by a DLL planted next to the executable.
 
 The token is opened explicitly with `OpenProcessToken(CurrentProcess(), TOKEN_QUERY, ...)` and the elevation comes from `x/sys/windows.Token.IsElevated`: a failure to read it is reported as an error instead of being silently read as "not an administrator".
 

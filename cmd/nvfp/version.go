@@ -2,9 +2,9 @@ package main
 
 const (
 	// version is the release this binary was built from.
-	version = "1.3.2"
+	version = "1.4.0"
 	// versionDate is the release date shown by --version.
-	versionDate = "2026 Oct 19"
+	versionDate = "2026 Oct 24"
 )
 
 const versionMessage = "nvfp " + version + " (" + versionDate + ")\n" +
